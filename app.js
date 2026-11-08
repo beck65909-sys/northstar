@@ -176,7 +176,16 @@ async function loadStaff() {
   ]);
   const P = Object.fromEntries(profiles.map(x => [x.id, x]));
   const score = Object.fromEntries(scores.map(x => [x.student_id, x]));
-  D = {classes, ct, groups, students, P, assignments, subs, score, lessons, feedback, ann, sessions, att};
+  const [wt, wtr, badges, sbadges, boxes, weekly, hof] = await Promise.all([
+    safe(sb.from('watching_time').select('*').order('week_start', {ascending:false})),
+    safe(sb.from('watching_time_results').select('*')),
+    safe(sb.from('badges').select('*')),
+    safe(sb.from('student_badges').select('*').order('awarded_at', {ascending:false})),
+    safe(sb.from('mystery_box_openings').select('*, mystery_box_rewards(title_uz)').order('opened_at', {ascending:false})),
+    safe(sb.from('weekly_group_leaderboard').select('*').order('week_start', {ascending:false}).limit(200)),
+    safe(sb.from('hall_of_fame').select('*').order('month', {ascending:false}).limit(30))
+  ]);
+  D = {classes, ct, groups, students, P, assignments, subs, score, lessons, feedback, ann, sessions, att, wt, wtr, badges, sbadges, boxes, weekly, hof};
 }
 async function loadStudent() {
   const st = await q(sb.from('students').select('*').eq('profile_id', me.id).maybeSingle());
@@ -194,7 +203,14 @@ async function loadStudent() {
     safe(sb.from('announcements').select('*').order('created_at', {ascending:false}).limit(10)),
     group ? safe(sb.from('live_sessions').select('*').eq('group_id', group.id).gte('starts_at', new Date(Date.now() - 3 * 36e5).toISOString()).order('starts_at').limit(5)) : []
   ]);
-  D = {group, assignments, subs, grades, streak, todayCh, board, lessons, ann, sessions};
+  const [wt, wtr, badges, sbadges, boxes] = await Promise.all([
+    safe(sb.from('watching_time').select('*').order('week_start', {ascending:false}).limit(10)),
+    safe(sb.from('watching_time_results').select('*').eq('student_id', me.id)),
+    safe(sb.from('badges').select('*')),
+    safe(sb.from('student_badges').select('*').eq('student_id', me.id)),
+    safe(sb.from('mystery_box_openings').select('*, mystery_box_rewards(title_uz, description)').eq('student_id', me.id).order('opened_at', {ascending:false}))
+  ]);
+  D = {group, assignments, subs, grades, streak, todayCh, board, lessons, ann, sessions, wt, wtr, badges, sbadges, boxes};
 }
 async function loadParent() {
   const links = await q(sb.from('parent_students').select('student_id').eq('parent_id', me.id));
@@ -220,7 +236,8 @@ async function loadParent() {
     safe(sb.from('live_sessions').select('*').eq('group_id', kid.group_id).order('starts_at')),
     safe(sb.from('attendance').select('*').eq('student_id', active))
   ]);
-  D = {kids, active, kid, group, assignments, subs, grades, streak, board, ann, sessions, att};
+  const [badges, sbadges] = await Promise.all([safe(sb.from('badges').select('*')), safe(sb.from('student_badges').select('*').eq('student_id', active))]);
+  D = {kids, active, kid, group, assignments, subs, grades, streak, board, ann, sessions, att, badges, sbadges};
 }
 
 /* ---------------- staff helpers ---------------- */
@@ -263,12 +280,12 @@ function loginView() {
 function staff() {
   const head = me.role === 'head_teacher';
   const items = head
-    ? [['home','Bosh sahifa'],['teachers',"O'qituvchilar"],['classes','Sinflar'],['lessons','Namuna darslar'],['live','Jonli darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['announce',"E'lonlar"],['rating','Reyting'],['feedback','Fikrlar']]
-    : [['home','Bosh sahifa'],['classes','Mening sinflarim'],['lessons','Darslarim'],['live','Jonli darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['announce',"E'lonlar"],['rating','Reyting']];
+    ? [['home','Bosh sahifa'],['teachers',"O'qituvchilar"],['classes','Sinflar'],['lessons','Namuna darslar'],['live','Jonli darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['watch','Watching Time'],['announce',"E'lonlar"],['awards','Nishonlar'],['rating','Reyting'],['feedback','Fikrlar']]
+    : [['home','Bosh sahifa'],['classes','Mening sinflarim'],['lessons','Darslarim'],['live','Jonli darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['watch','Watching Time'],['announce',"E'lonlar"],['awards','Nishonlar'],['rating','Reyting']];
   if (!view || !items.some(i => i[0] === view)) view = 'home';
   const pc = pending().length;
   const nav = items.map(([k, l]) => `<button class="nav ${view === k ? 'on' : ''}" data-nav="${k}">${l}${k === 'check' && pc ? `<span class="pill p-warn">${pc}</span>` : ''}</button>`).join('');
-  const body = ({home: head ? headHome : teacherHome, teachers: headTeachers, classes: classesView, lessons: lessonsView, homework: homeworkView, check: checkView, rating: ratingView, feedback: feedbackView, announce: announceView, live: liveView})[view]();
+  const body = ({home: head ? headHome : teacherHome, teachers: headTeachers, classes: classesView, lessons: lessonsView, homework: homeworkView, check: checkView, rating: ratingView, feedback: feedbackView, announce: announceView, live: liveView, watch: watchView, awards: awardsView})[view]();
   return `<div class="shell"><aside class="side"><div class="brand" style="color:var(--primary)">${STAR}<b>NORTHSTAR</b></div>${nav}
     <div class="me"><b>${esc(me.full_name)}</b><div class="muted">${ROLE_UZ[me.role]} · ${esc(me.login)}</div><div class="row" style="margin-top:8px;gap:6px"><button class="btn sm o" data-act="pwOpen">Parol</button><button class="btn sm o" data-act="logout">Chiqish</button></div></div></aside>
     <div class="topbar">${nav}<button class="nav" data-act="logout">Chiqish</button></div>
@@ -311,6 +328,62 @@ function liveView() {
   <p class="muted" style="margin:0">Google Meet havolasini qo'shing — o'quvchi va ota-ona bosh sahifasida "Kirish" tugmasi chiqadi. Davomatni dars ichida belgilang.</p>
   <h2 style="font-size:18px">Kelgusi darslar (${up.length})</h2>${up.map(s => liveCard(s, true)).join('') || `<div class="empty">Rejalashtirilgan dars yo'q.</div>`}
   ${past.length ? `<h2 style="font-size:18px">O'tgan darslar</h2>${past.map(s => liveCard(s, true)).join('')}` : ''}`;
+}
+/* ---------- Watching Time, nishonlar, Mystery Box, haftalik natijalar ---------- */
+const weekStart = () => { const d = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Tashkent'})); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toLocaleDateString('en-CA'); };
+const ytEmbed = u => { const m = String(u || '').match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/); return m ? 'https://www.youtube.com/embed/' + m[1] : ''; };
+const badgeOf = id => (D.badges || []).find(b => b.id === id) || {};
+function badgeChips(list) {
+  if (!list.length) return `<span class="muted" style="font-size:13px">Hali nishon yo'q</span>`;
+  return `<div class="row" style="gap:6px">${list.map(sb => { const b = badgeOf(sb.badge_id); return `<span class="pill p-info" title="${esc(b.description || '')}">${esc(b.icon || '🏅')} ${esc(b.name_uz || '')}</span>`; }).join('')}</div>`;
+}
+function watchView() {
+  const cids = new Set(myClasses().map(c => c.id));
+  const list = (D.wt || []).filter(w => !w.class_id || cids.has(w.class_id) || me.role === 'head_teacher');
+  return `<div class="between"><h1 style="font-size:28px">Watching Time</h1><button class="btn p" data-act="newWatch">+ Video qo'shish</button></div>
+  <p class="muted" style="margin:0">Haftalik video + savollar. O'quvchi ko'rib, javob beradi: 60% dan yuqori natija — haftalik reytingga +3 bonus ball.</p>
+  ${list.length ? list.map(w => { const res = (D.wtr || []).filter(r => r.watching_time_id === w.id); const cls = (D.classes || []).find(c => c.id === w.class_id);
+    const st = (D.students || []).filter(s => !w.class_id || (D.groups.find(g => g.id === s.group_id) || {}).class_id === w.class_id);
+    const avg = res.length ? Math.round(res.reduce((a, r) => a + Number(r.score_percent), 0) / res.length) : 0;
+    return `<div class="card stack"><div class="between"><b>🎬 ${esc(w.title)}</b><span class="pill p-info">${esc(cls?.name || 'Hamma sinflar')} · ${fmt(w.week_start).split(',')[0]} haftasi</span></div>
+    <div class="muted" style="font-size:13px">${(w.questions || []).length} ta savol · ${res.length}/${st.length} ko'rdi${res.length ? ' · o\'rtacha ' + avg + '%' : ''}</div>
+    ${res.length ? `<details><summary class="muted" style="cursor:pointer">Natijalar</summary><div class="stack" style="margin-top:8px">${res.sort((a, b) => b.score_percent - a.score_percent).map(r => `<div class="between"><span>${esc(D.P[r.student_id]?.full_name)}</span><span class="num">${Number(r.score_percent)}% · +${r.bonus_points || 0}</span></div>`).join('')}</div></details>` : ''}</div>`; }).join('') : `<div class="empty">Hali video qo'shilmagan.</div>`}`;
+}
+function awardsView() {
+  const st = myGroups().flatMap(g => groupStudents(g.id));
+  const ids = new Set(st.map(s => s.profile_id));
+  const boxes = (D.boxes || []).filter(b => ids.has(b.student_id));
+  const manual = (D.badges || []).filter(b => ['helper', 'speaker', 'homework_star'].includes(b.code));
+  return `<h1 style="font-size:28px">Nishonlar va Mystery Box</h1>
+  <p class="muted" style="margin:0">Streak, mukammal challenge, 90+ uy vazifa va Watching Time nishonlari avtomatik beriladi. Qolganini shu yerdan bering. Har nishon haftalik reytingga bonus qo'shadi.</p>
+  <section class="card stack"><h2 style="font-size:18px">Nishon berish</h2>
+  ${st.length ? `<form id="badgeForm" class="row"><select id="bdS" style="flex:1;min-width:180px">${st.map(s => `<option value="${s.profile_id}">${esc(D.P[s.profile_id]?.full_name)}</option>`).join('')}</select><select id="bdB" style="flex:1;min-width:180px">${manual.map(b => `<option value="${b.id}">${esc(b.icon)} ${esc(b.name_uz)} (+${b.bonus_points})</option>`).join('')}</select><button class="btn p" type="submit">Berish</button></form>` : `<div class="empty">O'quvchi yo'q</div>`}</section>
+  <section class="card stack"><h2 style="font-size:18px">O'quvchilar nishonlari</h2>${st.map(s => `<div class="stack" style="border-top:1px solid var(--border);padding-top:8px"><b>${esc(D.P[s.profile_id]?.full_name)}</b>${badgeChips((D.sbadges || []).filter(b => b.student_id === s.profile_id))}</div>`).join('') || `<div class="empty">—</div>`}</section>
+  <section class="card stack"><h2 style="font-size:18px">🎁 Mystery Box sovg'alari</h2><p class="muted" style="margin:0;font-size:13px">O'quvchi 7 kunlik streakda haftada 1 marta quti ochadi. Sovg'ani berganingizda belgilang.</p>
+  ${boxes.length ? boxes.map(b => `<div class="between"><span><b>${esc(D.P[b.student_id]?.full_name)}</b> · ${esc(b.mystery_box_rewards?.title_uz || '')} <span class="muted" style="font-size:12px">${fmt(b.opened_at)}</span></span>${b.is_claimed ? '<span class="pill p-ok">Berildi</span>' : `<button class="btn sm s" data-act="boxClaim" data-id="${b.id}">Berildi</button>`}</div>`).join('') : `<div class="empty">Hali quti ochilmagan.</div>`}</section>`;
+}
+function weeklyHistory() {
+  const gids = new Set(myGroups().map(g => g.id));
+  const rows = (D.weekly || []).filter(r => gids.has(r.group_id) || me.role === 'head_teacher');
+  const weeks = [...new Set(rows.map(r => r.week_start))].slice(0, 4);
+  const hof = (D.hof || []).filter(h => myClasses().some(c => c.id === h.class_id));
+  return `<section class="card stack"><div class="between"><h2 style="font-size:18px">Saqlangan haftalar</h2><button class="btn sm s" data-act="saveWeek">Bu haftani hozir saqlash</button></div>
+  <p class="muted" style="margin:0;font-size:13px">Har yakshanba 23:55 da avtomatik saqlanadi (bonuslar bilan). Oy oxirida har sinfning top-3 i Hall of Fame'ga tushadi.</p>
+  ${weeks.length ? weeks.map(w => `<details ${w === weeks[0] ? 'open' : ''}><summary style="cursor:pointer;font-weight:600">${fmt(w).split(',')[0]} haftasi</summary><div class="lb" style="margin-top:8px">${rows.filter(r => r.week_start === w).sort((a, b) => a.class_rank - b.class_rank).slice(0, 10).map(r => `<div class="lb-row"><span class="medal" style="background:${medal(r.class_rank - 1)}">${r.class_rank}</span><span class="n">${esc(r.full_name)}</span><span class="muted" style="font-size:12px">${r.bonus_total ? '+' + r.bonus_total + ' bonus' : ''}</span><b class="num">${Number(r.total_score)}</b></div>`).join('')}</div></details>`).join('') : `<div class="empty">Hali saqlangan hafta yo'q.</div>`}
+  ${hof.length ? `<h3 style="font-size:16px;margin-top:8px">🏛 Hall of Fame</h3>${hof.map(h => `<div class="between"><span>${['🥇','🥈','🥉'][h.rank - 1] || h.rank} ${esc(D.P[h.student_id]?.full_name || '')}</span><span class="muted">${OYLAR[new Date(h.month).getMonth()]} · ${Number(h.score)}</span></div>`).join('')}` : ''}</section>`;
+}
+function watchCard() {
+  const done = new Set((D.wtr || []).map(r => r.watching_time_id));
+  const w = (D.wt || []).find(x => !done.has(x.id));
+  if (!w) return '';
+  return `<div class="card stack"><div class="muted" style="font-size:12px;font-weight:600;letter-spacing:.06em">🎬 WATCHING TIME · BONUS +3</div><b>${esc(w.title)}</b><button class="btn s" data-act="watchOpen" data-id="${w.id}">Ko'rish va javob berish</button></div>`;
+}
+function rewardsCard() {
+  const k = D.streak && D.streak.last_completed_date >= new Date(Date.now() - 864e5).toLocaleDateString('en-CA', {timeZone:'Asia/Tashkent'}) ? D.streak.current_streak : 0;
+  const lastBox = (D.boxes || [])[0]; const recent = lastBox && (Date.now() - new Date(lastBox.opened_at)) < 7 * 864e5;
+  const can = k >= 7 && !recent;
+  return `<div class="card stack"><div class="between"><b>🏅 Nishonlarim</b><span class="muted">${(D.sbadges || []).length} ta</span></div>${badgeChips(D.sbadges || [])}
+  <div class="between" style="border-top:1px solid var(--border);padding-top:10px"><div><b>🎁 Mystery Box</b><div class="muted" style="font-size:12px">${can ? 'Quti tayyor!' : recent ? 'Bu hafta ochildi: ' + esc(lastBox.mystery_box_rewards?.title_uz || '') : `7 kunlik streak kerak (hozir ${k})`}</div></div>${can ? '<button class="btn sm g" data-act="boxOpen">Ochish</button>' : ''}</div></div>`;
 }
 function openLesson(id) {
   const l = D.lessons.find(x => x.id === id); if (!l) return;
@@ -390,7 +463,8 @@ function checkedHistory() {
 function ratingView() {
   return `<h1 style="font-size:28px">Reyting</h1><p class="muted" style="margin:0">Haftalik ball: vazifa bajarilishi 30%, sifati 30%, Daily Challenge 20%, faollik 20% + streak bonusi (maks. 100).</p>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">${myClasses().map(c => { const r = Object.values(D.score).filter(x => x.class_id === c.id).sort((a, b) => b.score - a.score); const avg = r.length ? Math.round(r.reduce((a, x) => a + Number(x.score), 0) / r.length) : 0;
-    return `<section class="card stack"><div class="between"><h2 style="font-size:18px">${esc(c.name)}</h2><span class="muted" style="font-size:13px">o'rtacha <b class="num" style="color:var(--text)">${avg}</b></span></div><div class="lb">${r.slice(0, 3).map((x, i) => `<div class="lb-row"><span class="medal" style="background:${medal(i)}">${i + 1}</span><span class="n">${esc(x.full_name)}</span><b class="num">${x.score}</b></div>`).join('') || `<div class="empty">O'quvchi yo'q</div>`}</div></section>`; }).join('') || `<div class="empty">Sinf yo'q</div>`}</div>`;
+    return `<section class="card stack"><div class="between"><h2 style="font-size:18px">${esc(c.name)}</h2><span class="muted" style="font-size:13px">o'rtacha <b class="num" style="color:var(--text)">${avg}</b></span></div><div class="lb">${r.slice(0, 3).map((x, i) => `<div class="lb-row"><span class="medal" style="background:${medal(i)}">${i + 1}</span><span class="n">${esc(x.full_name)}</span><b class="num">${x.score}</b></div>`).join('') || `<div class="empty">O'quvchi yo'q</div>`}</div></section>`; }).join('') || `<div class="empty">Sinf yo'q</div>`}</div>
+  ${weeklyHistory()}`;
 }
 
 /* student */
@@ -408,6 +482,7 @@ function studentView() {
     <div class="card stack"><div class="between" style="font-size:13px"><b>${esc(g?.name || '')}</b><span class="muted">Mavzu ${((g?.current_topic || 0) % TOPICS.length) + 1}/${TOPICS.length}</span></div><div class="bar"><i style="width:${(((g?.current_topic || 0) % TOPICS.length) + 1) / TOPICS.length * 100}%"></i></div><div class="muted" style="font-size:13px">${topic.unit ? esc(topic.unit) + ' · ' : ''}${esc(topic.t)}</div></div>
     ${(() => { const nx = (D.sessions || []).find(s => sessionEnd(s) >= Date.now()); return nx ? liveCard(nx, false, 'KEYINGI JONLI DARS') : ''; })()}
     ${(D.ann || []).slice(0, 2).map(annCard).join('')}
+    ${watchCard()}
     <div class="hero-card"><div style="font-size:12px;font-weight:600;letter-spacing:.06em;opacity:.8">DAILY CHALLENGE · 1 DAQIQA</div><div style="font-size:17px;font-weight:700">${D.todayCh ? 'Bugungi challenge bajarildi ✓ (' + D.todayCh.score + '/3)' : '3 ta savol — streakni saqlang'}</div>${D.todayCh ? '' : '<button class="btn" style="background:#fff;color:#1746A2" data-act="challenge">Boshlash</button>'}</div>
     <div class="card stack"><div class="between"><b>Vazifalar</b><span class="muted">${open.length} ta</span></div>${open.slice(0, 3).map(a => `<div class="between"><div><div style="font-weight:600">${esc(a.title)}</div><div style="font-size:12px;font-weight:600;color:${a.due_at && new Date(a.due_at) < new Date() ? 'var(--bad)' : 'var(--warn)'}">${fmt(a.due_at)} gacha</div></div><button class="btn sm s" data-act="submit" data-id="${a.id}">Topshirish</button></div>`).join('') || (waiting.length ? '' : '<div class="muted">Hamma vazifa topshirilgan 🎉</div>')}
     ${waiting.map(a => `<div class="between"><div style="font-weight:600">${esc(a.title)}</div><span class="pill p-info">Tekshirilmoqda</span></div>`).join('')}</div>
@@ -418,7 +493,7 @@ function studentView() {
   } else if (view === 'results') {
     const res = D.grades.filter(x => x.status === 'approved');
     const mine = D.board.find(x => x.student_id === me.id);
-    body = `<h1 style="font-size:24px">Natijalar</h1><div class="kpis">${kpi('Haftalik ball', mine ? mine.score : '—')}${kpi('Streak', k)}</div>
+    body = `<h1 style="font-size:24px">Natijalar</h1><div class="kpis">${kpi('Haftalik ball', mine ? mine.score : '—')}${kpi('Streak', k)}</div>${rewardsCard()}
     ${res.map(x => `<div class="card stack"><div class="between"><b>${esc(D.assignments.find(a => a.id === x.assignment_id)?.title)}</b><b class="num" style="color:var(--ok)">${x.final_score}/100</b></div><div class="muted">"${esc(x.final_feedback)}"</div></div>`).join('') || `<div class="empty">Baholangan ish hali yo'q.</div>`}`;
   } else if (view === 'lessons') {
     const cur = (g?.current_topic || 0) % TOPICS.length;
@@ -452,7 +527,8 @@ function parentView() {
     const pastS = (D.sessions || []).filter(s => sessionEnd(s) < Date.now()).map(s => s.id);
     const came = (D.att || []).filter(a => pastS.includes(a.session_id) && a.status !== 'absent').length;
     body += `<div class="kpis">${kpi('Haftalik ball', mine ? mine.score : '—')}${kpi('Streak', k)}${pastS.length ? kpi('Davomat', came + '/' + pastS.length) : ''}</div>
-    <div class="card stack"><div class="between"><span>Guruhda o'rni</span><b class="num">${mine ? mine.rnk + "-o'rin" : '—'}</b></div></div>${boardHtml(D.board, kid.profile_id, 'Guruh top-3')}`;
+    <div class="card stack"><div class="between"><span>Guruhda o'rni</span><b class="num">${mine ? mine.rnk + "-o'rin" : '—'}</b></div></div>
+    <div class="card stack"><b>🏅 Nishonlar</b>${badgeChips(D.sbadges || [])}</div>${boardHtml(D.board, kid.profile_id, 'Guruh top-3')}`;
   }
   return phoneShell(body, [['home','Bugun',ICON.home],['stats','Statistika',ICON.cup]]);
 }
@@ -536,6 +612,14 @@ document.addEventListener('click', async e => {
   if (a === 'newLive') { const gs = myGroups(); if (!gs.length) return toast('Avval guruh yarating');
     const t = new Date(Date.now() + 864e5); t.setHours(15, 0, 0, 0); const dv = new Date(t.getTime() - t.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
     return modal(`<h2>Jonli dars rejalashtirish</h2><form id="liveForm" class="stack"><div class="field"><label for="lvG">Guruh</label><select id="lvG">${gs.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div><div class="field"><label for="lvD">Boshlanish vaqti</label><input id="lvD" type="datetime-local" value="${dv}" required></div><div class="field"><label for="lvM">Davomiyligi (daqiqa)</label><input id="lvM" type="number" min="10" max="240" value="45"></div><div class="field"><label for="lvU">Google Meet havolasi</label><input id="lvU" type="url" placeholder="https://meet.google.com/abc-defg-hij"></div>${formBtns('Saqlash')}</form>`); }
+  if (a === 'newWatch') { const cs = myClasses(); if (!cs.length) return toast('Avval sinf kerak');
+    return modal(`<h2>Watching Time qo'shish</h2><form id="watchForm" class="stack"><div class="field"><label for="wtC">Sinf</label><select id="wtC">${cs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label for="wtT">Nomi</label><input id="wtT" required placeholder="Peppa Pig — My family"></div><div class="field"><label for="wtU">YouTube havolasi</label><input id="wtU" required placeholder="https://www.youtube.com/watch?v=..."></div><div class="field"><label for="wtQ">Savollar</label><textarea id="wtQ" style="min-height:180px" placeholder="Who is Peppa's brother?&#10;*George&#10;Danny&#10;Pedro&#10;&#10;Where do they live?&#10;in a flat&#10;*in a house"></textarea><span class="muted" style="font-size:12px">Har savol: 1-qator savol, keyin variantlar; to'g'ri javob oldiga * qo'ying. Savollar orasida bo'sh qator.</span></div>${formBtns('Saqlash')}</form>`); }
+  if (a === 'watchOpen') { const w = D.wt.find(x => x.id === id); if (!w) return;
+    return modal(`<div class="between"><h2 style="font-size:18px">🎬 ${esc(w.title)}</h2><button class="btn sm o" type="button" data-act="close">Yopish</button></div><div style="position:relative;padding-top:56.25%;border-radius:12px;overflow:hidden;background:#000"><iframe src="${esc(w.youtube_embed_url)}" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen title="${esc(w.title)}"></iframe></div>
+    <form id="watchAns" data-id="${w.id}" class="stack">${(w.questions || []).map((x, i) => `<fieldset style="border:1px solid var(--border);border-radius:12px;padding:10px"><legend style="font-weight:600;padding:0 6px">${i + 1}. ${esc(x.q)}</legend>${x.o.map((o, j) => `<label class="row" style="gap:8px;padding:4px 0"><input type="radio" name="wq${i}" value="${j}" style="width:18px;height:18px" required> ${esc(o)}</label>`).join('')}</fieldset>`).join('')}${formBtns('Javoblarni yuborish')}</form>`); }
+  if (a === 'boxOpen') { b.disabled = true; try { const r = await q(sb.rpc('open_mystery_box')); modal(`<div style="text-align:center;display:grid;gap:10px"><div style="font-size:48px">🎁</div><h2>${esc(r.title)}</h2><p class="muted" style="margin:0">${esc(r.description || '')}</p><p style="margin:0;font-size:13px">O'qituvchingiz sovg'ani beradi.</p><button class="btn p" data-act="closeReload">Zo'r!</button></div>`); } catch (err) { b.disabled = false; toast(err.message); } return; }
+  if (a === 'boxClaim') { b.disabled = true; try { await q(sb.from('mystery_box_openings').update({is_claimed: true}).eq('id', id)); load(); } catch (err) { b.disabled = false; toast(err.message); } return; }
+  if (a === 'saveWeek') { b.disabled = true; try { const n = await q(sb.rpc('save_week_now')); toast(n + ' ta o\'quvchi natijasi saqlandi'); load(); } catch (err) { b.disabled = false; toast(err.message); } return; }
   if (a === 'aiRun') { b.disabled = true; b.textContent = '🤖 Tekshirilmoqda…'; const r = await aiCheck(id); if (r) { toast('AI tekshirdi: ' + r.ai_score + ' ball'); load(); } else { b.disabled = false; b.textContent = '🤖 AI bilan tekshirish'; } return; }
   if (a === 'att') { b.disabled = true;
     try { await q(sb.from('attendance').upsert({session_id: id, student_id: b.dataset.st, status: b.dataset.k, marked_by: me.id, marked_at: new Date().toISOString()}, {onConflict: 'session_id,student_id'})); load(); } catch (err) { b.disabled = false; toast(err.message); } return; }
@@ -567,6 +651,15 @@ document.addEventListener('submit', async e => {
       modal(`<h2>${esc(n)} qo'shildi</h2>${credsBox(u, "O'quvchi")}${extra}<button class="btn p" data-act="closeReload">Tayyor</button>`); return; }
     if (f.id === 'hwForm') { const t = $('#hwT').value.trim(); if (!t) { toast('Vazifa nomini yozing'); return; }
       await q(sb.from('assignments').insert({type: 'written', title: t, instructions: $('#hwI').value.trim(), target_group_id: $('#hwG').value, due_at: new Date($('#hwD').value).toISOString(), created_by: me.id})); closeModal(); view = 'homework'; toast('Vazifa berildi'); load(); return; }
+    if (f.id === 'watchForm') { const url = ytEmbed($('#wtU').value); if (!url) { toast("YouTube havolasi noto'g'ri"); return; }
+      const qs = $('#wtQ').value.split(/\n\s*\n/).map(bl => bl.split('\n').map(x => x.trim()).filter(Boolean)).filter(bl => bl.length >= 3).map(bl => { const o = bl.slice(1); const a = o.findIndex(x => x.startsWith('*')); return {q: bl[0], o: o.map(x => x.replace(/^\*\s*/, '')), a}; });
+      if (!qs.length) { toast("Kamida 1 ta savol yozing (savol + 2 variant)"); return; }
+      if (qs.some(x => x.a < 0)) { toast("Har savolda to'g'ri javob oldiga * qo'ying"); return; }
+      await q(sb.from('watching_time').insert({week_start: weekStart(), class_id: $('#wtC').value, title: $('#wtT').value.trim(), youtube_embed_url: url, questions: qs, created_by: me.id})); closeModal(); view = 'watch'; toast('Video qo\'shildi'); load(); return; }
+    if (f.id === 'watchAns') { const w = D.wt.find(x => x.id === f.dataset.id); const ans = (w.questions || []).map((x, i) => { const r = f.querySelector(`input[name=wq${i}]:checked`); return r ? +r.value : null; });
+      const r = await q(sb.rpc('submit_watching', {p_id: w.id, p_answers: ans}));
+      modal(`<div style="text-align:center;display:grid;gap:10px"><div style="font-size:44px">🎬</div><h2>${r.correct}/${r.total} to'g'ri (${r.percent}%)</h2><p style="margin:0">${r.bonus ? '+' + r.bonus + ' bonus ball haftalik reytingga!' : "Keyingi safar diqqat bilan ko'ring!"}</p><button class="btn p" data-act="closeReload">Davom etish</button></div>`); return; }
+    if (f.id === 'badgeForm') { await q(sb.from('student_badges').insert({student_id: $('#bdS').value, badge_id: $('#bdB').value, awarded_by: me.id})); toast('Nishon berildi'); load(); return; }
     if (f.id === 'annForm') { const [aud, tid] = $('#annA').value.split(':'); const t = $('#annT').value.trim(), bd = $('#annB').value.trim();
       if (!t || !bd) { toast("Sarlavha va matnni yozing"); return; }
       await q(sb.from('announcements').insert({author_id: me.id, audience: aud, target_id: tid || null, title: t, body: bd})); closeModal(); view = 'announce'; toast("E'lon yuborildi"); load(); return; }
