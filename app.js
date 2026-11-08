@@ -15,6 +15,7 @@ const ICON = {
   task: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
   cup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.8 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>',
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/></svg>',
   out: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/></svg>'
 };
 
@@ -84,9 +85,13 @@ async function loadStaff() {
     q(sb.from('submissions').select('*, submission_grades(*)').order('submitted_at', {ascending:false})),
     q(sb.rpc('my_student_scores'))
   ]);
+  const [lessons, feedback] = await Promise.all([
+    q(sb.from('lessons').select('*, lesson_sections(*)').order('position')),
+    me.role === 'head_teacher' ? q(sb.from('feedback').select('*').order('created_at', {ascending:false})) : []
+  ]);
   const P = Object.fromEntries(profiles.map(x => [x.id, x]));
   const score = Object.fromEntries(scores.map(x => [x.student_id, x]));
-  D = {classes, ct, groups, students, P, assignments, subs, score};
+  D = {classes, ct, groups, students, P, assignments, subs, score, lessons, feedback};
 }
 async function loadStudent() {
   const st = await q(sb.from('students').select('*').eq('profile_id', me.id).maybeSingle());
@@ -99,7 +104,8 @@ async function loadStudent() {
     q(sb.from('daily_challenges').select('*').eq('student_id', me.id).eq('challenge_date', todayISO()).maybeSingle()),
     group ? q(sb.rpc('group_leaderboard', {p_group_id: group.id})) : []
   ]);
-  D = {group, assignments, subs, grades, streak, todayCh, board};
+  const lessons = await q(sb.from('lessons').select('*, lesson_sections(*)').order('position'));
+  D = {group, assignments, subs, grades, streak, todayCh, board, lessons};
 }
 async function loadParent() {
   const links = await q(sb.from('parent_students').select('student_id').eq('parent_id', me.id));
@@ -163,16 +169,43 @@ function loginView() {
 function staff() {
   const head = me.role === 'head_teacher';
   const items = head
-    ? [['home','Bosh sahifa'],['teachers',"O'qituvchilar"],['classes','Sinflar'],['homework','Uy vazifalar'],['check','Tekshirish'],['rating','Reyting']]
-    : [['home','Bosh sahifa'],['classes','Mening sinflarim'],['homework','Uy vazifalar'],['check','Tekshirish'],['rating','Reyting']];
+    ? [['home','Bosh sahifa'],['teachers',"O'qituvchilar"],['classes','Sinflar'],['lessons','Namuna darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['rating','Reyting'],['feedback','Fikrlar']]
+    : [['home','Bosh sahifa'],['classes','Mening sinflarim'],['lessons','Darslarim'],['homework','Uy vazifalar'],['check','Tekshirish'],['rating','Reyting']];
   if (!view || !items.some(i => i[0] === view)) view = 'home';
   const pc = pending().length;
   const nav = items.map(([k, l]) => `<button class="nav ${view === k ? 'on' : ''}" data-nav="${k}">${l}${k === 'check' && pc ? `<span class="pill p-warn">${pc}</span>` : ''}</button>`).join('');
-  const body = ({home: head ? headHome : teacherHome, teachers: headTeachers, classes: classesView, homework: homeworkView, check: checkView, rating: ratingView})[view]();
+  const body = ({home: head ? headHome : teacherHome, teachers: headTeachers, classes: classesView, lessons: lessonsView, homework: homeworkView, check: checkView, rating: ratingView, feedback: feedbackView})[view]();
   return `<div class="shell"><aside class="side"><div class="brand" style="color:var(--primary)">${STAR}<b>NORTHSTAR</b></div>${nav}
     <div class="me"><b>${esc(me.full_name)}</b><div class="muted">${ROLE_UZ[me.role]} · ${esc(me.login)}</div><button class="btn sm o" data-act="logout" style="margin-top:8px">Chiqish</button></div></aside>
     <div class="topbar">${nav}<button class="nav" data-act="logout">Chiqish</button></div>
-    <main class="main">${body}</main></div>`;
+    <main class="main">${body}</main></div>${FB_BTN}`;
+}
+const FB_BTN = `<button class="btn g fb-btn" data-act="fbOpen" aria-label="Fikr bildirish">💬 Fikr bildirish</button>`;
+const SEC_UZ = {warm_up:'Warm-up', vocabulary:'Vocabulary', grammar:'Grammar', reading:'Reading', listening:'Listening', speaking:'Speaking', writing:'Writing', quiz:'Quiz'};
+function lessonCard(l, actions) {
+  return `<div class="card stack"><div class="between"><b>${esc(l.title)}</b>${l.is_template ? '<span class="pill p-info">Namuna</span>' : ''}</div>
+    <div class="muted" style="font-size:13px">${(l.lesson_sections || []).length} bo'lim · ${(l.lesson_sections || []).sort((a, b) => a.position - b.position).map(s => SEC_UZ[s.section_type]).join(', ')}</div>
+    <div class="row"><button class="btn sm s" data-act="openLesson" data-id="${l.id}">Ochish</button>${actions || ''}</div></div>`;
+}
+function lessonsView() {
+  const head = me.role === 'head_teacher';
+  const mine = D.lessons.filter(l => l.owner_id === me.id && !l.is_template);
+  const tpl = D.lessons.filter(l => l.is_template);
+  return `<div class="between"><h1 style="font-size:28px">${head ? 'Namuna darslar' : 'Darslarim'}</h1><button class="btn p" data-act="newLesson">+ Dars yaratish</button></div>
+  <p class="muted" style="margin:0">${head ? "Namuna darslar barcha o'qituvchilarga ochiq — ular nusxa olib, o'zlariga moslashtiradi." : "Darslaringiz o'quvchilaringizga doim ochiq. Namuna darslardan nusxa olishingiz mumkin."}</p>
+  ${head ? '' : `<h2 style="font-size:18px">Mening darslarim (${mine.length})</h2>${mine.map(l => lessonCard(l, `<button class="btn sm t" data-act="delLesson" data-id="${l.id}">O'chirish</button>`)).join('') || `<div class="empty">Hali dars yo'q. Pastdagi namunalardan nusxa oling yoki yangi dars yarating.</div>`}`}
+  <h2 style="font-size:18px">Namuna darslar · Unit 1 (${tpl.length})</h2>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">${tpl.map(l => lessonCard(l, head ? '' : (mine.some(m => m.copied_from === l.id) ? '<span class="pill p-ok">Nusxa olingan</span>' : `<button class="btn sm p" data-act="copyLesson" data-id="${l.id}">Nusxa olish</button>`))).join('') || `<div class="empty">Namuna dars yo'q</div>`}</div>`;
+}
+function feedbackView() {
+  return `<h1 style="font-size:28px">Fikrlar</h1><p class="muted" style="margin:0">Foydalanuvchilar «Fikr bildirish» tugmasi orqali yozgan takliflar.</p>
+  ${D.feedback.length ? D.feedback.map(f => `<div class="card stack"><div class="between"><b>${esc(D.P[f.author_id]?.full_name || 'Foydalanuvchi')}</b><span class="muted" style="font-size:13px">${fmt(f.created_at)} · ${esc(f.page || '')}</span></div><div style="white-space:pre-wrap">${esc(f.body)}</div><div>${f.status === 'done' ? '<span class="pill p-ok">Bajarildi</span>' : `<button class="btn sm s" data-act="fbDone" data-id="${f.id}">Bajarildi deb belgilash</button>`}</div></div>`).join('') : `<div class="empty">Hali fikr yo'q.</div>`}`;
+}
+function openLesson(id) {
+  const l = D.lessons.find(x => x.id === id); if (!l) return;
+  const secs = (l.lesson_sections || []).sort((a, b) => a.position - b.position);
+  modal(`<div class="between"><h2>${esc(l.title)}</h2><button class="btn sm o" data-act="close">Yopish</button></div>${l.objective ? `<p class="muted" style="margin:0">${esc(l.objective)}</p>` : ''}
+  ${secs.map(s => `<div class="stack" style="border-top:1px solid var(--border);padding-top:10px"><span class="pill p-info" style="justify-self:start">${SEC_UZ[s.section_type]}</span><div style="white-space:pre-wrap">${esc(s.content?.text || '')}</div>${s.content?.url ? `<a href="${esc(s.content.url)}" target="_blank" rel="noopener">Video / material ↗</a>` : ''}</div>`).join('')}`);
 }
 function kpi(l, v, color) { return `<div class="card kpi"><div class="l">${l}</div><div class="v num" ${color ? `style="color:${color}"` : ''}>${v}</div></div>`; }
 function teacherHome() {
@@ -239,7 +272,7 @@ function ratingView() {
 
 /* student */
 function studentView() {
-  if (!view || !['home','tasks','results','rating'].includes(view)) view = 'home';
+  if (!view || !['home','lessons','tasks','results','rating'].includes(view)) view = 'home';
   const g = D.group; const k = D.streak && D.streak.last_completed_date >= new Date(Date.now() - 864e5).toLocaleDateString('en-CA', {timeZone:'Asia/Tashkent'}) ? D.streak.current_streak : 0;
   const subOf = id => D.subs.find(s => s.assignment_id === id);
   const open = D.assignments.filter(a => { const s = subOf(a.id); return !s || s.status === 'returned'; });
@@ -260,8 +293,10 @@ function studentView() {
     const mine = D.board.find(x => x.student_id === me.id);
     body = `<h1 style="font-size:24px">Natijalar</h1><div class="kpis">${kpi('Haftalik ball', mine ? mine.score : '—')}${kpi('Streak', k)}</div>
     ${res.map(x => `<div class="card stack"><div class="between"><b>${esc(D.assignments.find(a => a.id === x.assignment_id)?.title)}</b><b class="num" style="color:var(--ok)">${x.final_score}/100</b></div><div class="muted">"${esc(x.final_feedback)}"</div></div>`).join('') || `<div class="empty">Baholangan ish hali yo'q.</div>`}`;
+  } else if (view === 'lessons') {
+    body = `<h1 style="font-size:24px">Darslar</h1>${D.lessons.map(l => lessonCard(l)).join('') || `<div class="empty">O'qituvchingiz hali dars qo'shmagan.</div>`}`;
   } else body = boardHtml(D.board, me.id, 'Reyting · ' + (g?.name || ''));
-  return phoneShell(body, [['home','Bosh',ICON.home],['tasks','Vazifa',ICON.task],['results','Natija',ICON.cup],['rating','Reyting',ICON.star]]);
+  return phoneShell(body, [['home','Bosh',ICON.home],['lessons','Darslar',ICON.book],['tasks','Vazifa',ICON.task],['results','Natija',ICON.cup],['rating','Reyting',ICON.star]]);
 }
 function boardHtml(board, selfId, title) {
   const top = board.filter(x => x.rnk <= 3); const mine = board.find(x => x.student_id === selfId);
@@ -289,7 +324,7 @@ function parentView() {
   return phoneShell(body, [['home','Bugun',ICON.home],['stats','Statistika',ICON.cup]]);
 }
 function phoneShell(body, tabs) {
-  return `<div class="phone">${body}</div><nav class="bottom"><div class="in" style="grid-template-columns:repeat(${tabs.length + 1},1fr)">${tabs.map(([k, l, i]) => `<button class="${view === k ? 'on' : ''}" data-nav="${k}">${i}${l}</button>`).join('')}<button data-act="logout">${ICON.out}Chiqish</button></div></nav>`;
+  return `<div class="phone">${body}<button class="btn o sm" data-act="fbOpen" style="justify-self:center">💬 Fikr bildirish</button></div><nav class="bottom"><div class="in" style="grid-template-columns:repeat(${tabs.length + 1},1fr)">${tabs.map(([k, l, i]) => `<button class="${view === k ? 'on' : ''}" data-nav="${k}">${i}${l}</button>`).join('')}<button data-act="logout">${ICON.out}Chiqish</button></div></nav>`;
 }
 
 /* ---------------- modals ---------------- */
@@ -350,6 +385,15 @@ document.addEventListener('click', async e => {
   if (a === 'submit') { const as = D.assignments.find(x => x.id === id); const s = D.subs.find(x => x.assignment_id === id);
     return modal(`<h2>${esc(as.title)}</h2><p class="muted" style="margin:0;white-space:pre-wrap">${esc(as.instructions)}</p><form id="subForm" data-id="${id}" class="stack"><div class="field"><label for="subT">Javobingiz</label><textarea id="subT" required>${esc(s?.text_answer || '')}</textarea></div>${formBtns('Yuborish')}</form>`); }
   if (a === 'challenge') { chal.done = false; return startChallenge(); }
+  if (a === 'openLesson') return openLesson(id);
+  if (a === 'copyLesson') { b.disabled = true; try { await q(sb.rpc('copy_lesson', {p_lesson_id: id})); toast("Nusxa olindi — dars o'quvchilaringizga ochildi"); load(); } catch (err) { b.disabled = false; toast(err.message); } return; }
+  if (a === 'delLesson') { if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Rostdan o\'chirilsinmi?'; return; } try { await q(sb.from('lessons').delete().eq('id', id)); toast("O'chirildi"); load(); } catch (err) { toast(err.message); } return; }
+  if (a === 'newLesson') return modal(`<h2>Dars yaratish</h2><form id="lsForm" class="stack"><div class="field"><label for="lsT">Mavzu</label><input id="lsT" required placeholder="Present Simple — Daily Routines"></div><div class="field"><label for="lsO">Maqsad</label><input id="lsO" placeholder="Students can talk about their daily routine."></div>
+    ${Object.entries(SEC_UZ).map(([k, v]) => `<div class="field"><label for="ls_${k}">${v} (ixtiyoriy)</label><textarea id="ls_${k}" style="min-height:70px"></textarea></div>`).join('')}
+    <div class="field"><label for="lsV">Video yoki material havolasi (ixtiyoriy)</label><input id="lsV" type="url" placeholder="https://youtube.com/..."></div>
+    ${me.role === 'head_teacher' ? '<label class="row"><input id="lsTpl" type="checkbox" checked style="width:20px;height:20px"> Namuna dars (hamma o\'qituvchiga ochiq)</label>' : ''}${formBtns('Saqlash')}</form>`);
+  if (a === 'fbOpen') return modal(`<h2>Fikr bildirish</h2><p class="muted" style="margin:0">Nima yoqdi, nima yoqmadi, nimani o'zgartirish kerak? Taklifingiz to'g'ridan-to'g'ri ishlab chiquvchiga boradi.</p><form id="fbForm" class="stack"><div class="field"><label for="fbT">Fikringiz</label><textarea id="fbT" required></textarea></div>${formBtns('Yuborish')}</form>`);
+  if (a === 'fbDone') { try { await q(sb.from('feedback').update({status: 'done'}).eq('id', id)); load(); } catch (err) { toast(err.message); } return; }
   if (a === 'ans') { const x = chal.q[chal.i], i = +b.dataset.i; chal.answers.push(i);
     document.querySelectorAll('.q-opt').forEach((o, j) => { o.disabled = true; if (j === x.a) o.classList.add('ok'); else if (j === i) o.classList.add('no'); });
     if (i === x.a) chal.score++;
@@ -376,6 +420,14 @@ document.addEventListener('submit', async e => {
       modal(`<h2>${esc(n)} qo'shildi</h2>${credsBox(u, "O'quvchi")}${extra}<button class="btn p" data-act="closeReload">Tayyor</button>`); return; }
     if (f.id === 'hwForm') { const t = $('#hwT').value.trim(); if (!t) { toast('Vazifa nomini yozing'); return; }
       await q(sb.from('assignments').insert({type: 'written', title: t, instructions: $('#hwI').value.trim(), target_group_id: $('#hwG').value, due_at: new Date($('#hwD').value).toISOString(), created_by: me.id})); closeModal(); view = 'homework'; toast('Vazifa berildi'); load(); return; }
+    if (f.id === 'fbForm') { const t = $('#fbT').value.trim(); if (t.length < 2) { toast('Fikringizni yozing'); return; } await q(sb.from('feedback').insert({author_id: me.id, page: ROLE_UZ[me.role] + ' · ' + (view || ''), body: t})); closeModal(); toast('Rahmat! Fikringiz yuborildi.'); return; }
+    if (f.id === 'lsForm') { const title = $('#lsT').value.trim(); if (!title) { toast('Mavzuni yozing'); return; }
+      const l = await q(sb.from('lessons').insert({owner_id: me.id, title, objective: $('#lsO').value.trim() || null, is_template: !!($('#lsTpl') && $('#lsTpl').checked), position: D.lessons.length + 1}).select().single());
+      const url = $('#lsV').value.trim(); let pos = 0;
+      const rows = Object.keys(SEC_UZ).map(k => ({k, t: $('#ls_' + k).value.trim()})).filter(x => x.t || (url && x.k === 'warm_up')).map(x => ({lesson_id: l.id, section_type: x.k, title: SEC_UZ[x.k], content: {text: x.t, ...(url && x.k === 'warm_up' ? {url} : {})}, position: ++pos}));
+      if (url && !rows.length) rows.push({lesson_id: l.id, section_type: 'listening', title: 'Listening', content: {text: '', url}, position: 1});
+      if (rows.length) await q(sb.from('lesson_sections').insert(rows));
+      closeModal(); toast('Dars saqlandi'); load(); return; }
     if (f.id === 'subForm') { const t = $('#subT').value.trim(); if (t.length < 5) { toast('Javob juda qisqa'); return; } const aid = f.dataset.id; const s = D.subs.find(x => x.assignment_id === aid);
       if (s) await q(sb.from('submissions').update({text_answer: t}).eq('id', s.id)); else await q(sb.from('submissions').insert({assignment_id: aid, student_id: me.id, text_answer: t}));
       closeModal(); toast("Yuborildi! O'qituvchi tekshiradi."); load(); return; }
