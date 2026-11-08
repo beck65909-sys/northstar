@@ -107,3 +107,4 @@ td{padding:11px 12px;border-top:1px solid var(--border)}
 .banner{font-size:13px;padding:8px 12px;border-radius:10px;background:var(--warn-bg);color:var(--warn)}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 .fb-btn{position:fixed;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:15;box-shadow:0 4px 12px rgba(23,35,59,.18)}
+[hidden]{display:none!important}

@@ -430,7 +430,7 @@ function classesView() {
   ${cs.length ? cs.map(c => `<section class="card stack"><div class="between"><div><h2 style="font-size:20px">${esc(c.name)}</h2><div class="muted" style="font-size:13px">${classTeachers(c.id).map(t => esc(t.full_name)).join(', ') || "O'qituvchi biriktirilmagan"}</div></div>
      <div class="row">${head ? `<button class="btn sm s" data-act="assignTeacher" data-id="${c.id}">O'qituvchi biriktirish</button>` : ''}<button class="btn sm o" data-act="newGroup" data-id="${c.id}">+ Guruh</button></div></div>
      ${classGroups(c.id).map(g => `<div class="stack" style="border-top:1px solid var(--border);padding-top:12px"><div class="between"><b>${esc(g.name)}</b><div class="row"><span class="muted" style="font-size:13px">Mavzu: ${esc(TOPICS[g.current_topic % TOPICS.length].t)}</span><button class="btn sm o" data-act="nextTopic" data-id="${g.id}">Keyingi mavzu</button><button class="btn sm s" data-act="newStudent" data-id="${g.id}">+ O'quvchi</button></div></div>
-       ${groupStudents(g.id).length ? `<div class="tbl-wrap"><table><tr><th>O'quvchi</th><th>Login</th><th>Holat</th><th>Ball</th><th>Streak</th></tr>${groupStudents(g.id).map(s => { const x = stStatus(s.profile_id, g.id); const sc = D.score[s.profile_id] || {}; return `<tr><td><b>${esc(D.P[s.profile_id]?.full_name)}</b></td><td class="muted">${esc(D.P[s.profile_id]?.login)}</td><td><span class="pill p-${x[0]}">${esc(x[1])}</span></td><td class="num">${sc.score ?? '—'}</td><td class="num">${sc.streak ?? 0}</td></tr>`; }).join('')}</table></div>` : `<div class="empty">Guruhda o'quvchi yo'q</div>`}</div>`).join('') || `<div class="muted">Guruh yo'q — «+ Guruh» tugmasini bosing.</div>`}</section>`).join('') : `<div class="empty">${head ? "Hali sinf yo'q." : 'Sizga hali sinf biriktirilmagan. Head teacherga murojaat qiling.'}</div>`}`;
+       ${groupStudents(g.id).length ? `<div class="tbl-wrap"><table><tr><th>O'quvchi</th><th>Login</th><th>Holat</th><th>Ball</th><th>Streak</th><th></th></tr>${groupStudents(g.id).map(s => { const x = stStatus(s.profile_id, g.id); const sc = D.score[s.profile_id] || {}; return `<tr><td><b>${esc(D.P[s.profile_id]?.full_name)}</b></td><td class="muted">${esc(D.P[s.profile_id]?.login)}</td><td><span class="pill p-${x[0]}">${esc(x[1])}</span></td><td class="num">${sc.score ?? '—'}</td><td class="num">${sc.streak ?? 0}</td><td><button class="btn sm o" data-act="parents" data-id="${s.profile_id}">👪 Ota-ona</button></td></tr>`; }).join('')}</table></div>` : `<div class="empty">Guruhda o'quvchi yo'q</div>`}</div>`).join('') || `<div class="muted">Guruh yo'q — «+ Guruh» tugmasini bosing.</div>`}</section>`).join('') : `<div class="empty">${head ? "Hali sinf yo'q." : 'Sizga hali sinf biriktirilmagan. Head teacherga murojaat qiling.'}</div>`}`;
 }
 function homeworkView() {
   const gids = new Set(myGroups().map(g => g.id));
@@ -577,7 +577,21 @@ document.addEventListener('click', async e => {
   if (a === 'newClass') return modal(`<h2>Sinf yaratish</h2><form id="cForm" class="stack"><div class="field"><label for="cN">Sinf nomi</label><input id="cN" placeholder="5-A" required></div><div class="field"><label for="cT">O'qituvchi</label><select id="cT"><option value="">—</option>${Object.values(D.P).filter(p => p.role === 'teacher' || p.role === 'head_teacher').map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join('')}</select></div>${formBtns('Yaratish')}</form>`);
   if (a === 'assignTeacher') { const cur = D.ct.filter(x => x.class_id === id).map(x => x.teacher_id); return modal(`<h2>O'qituvchilar · ${esc(D.classes.find(c => c.id === id).name)}</h2><form id="atForm" data-id="${id}" class="stack"><p class="muted" style="margin:0">Bitta sinfga 2 tagacha o'qituvchi.</p>${Object.values(D.P).filter(p => p.role === 'teacher' || p.role === 'head_teacher').map(t => `<label class="row"><input type="checkbox" value="${t.id}" style="width:20px;height:20px" ${cur.includes(t.id) ? 'checked' : ''}> ${esc(t.full_name)}</label>`).join('')}${formBtns('Saqlash')}</form>`); }
   if (a === 'newGroup') { const c = D.classes.find(x => x.id === id); return modal(`<h2>Guruh yaratish · ${esc(c.name)}</h2><form id="gForm" data-id="${id}" class="stack"><div class="field"><label for="gN">Guruh nomi</label><input id="gN" value="${esc(c.name)} · ${classGroups(id).length + 1}-guruh" required></div>${formBtns('Yaratish')}</form>`); }
-  if (a === 'newStudent') return modal(`<h2>O'quvchi qo'shish · ${esc(D.groups.find(g => g.id === id).name)}</h2><form id="sForm" data-id="${id}" class="stack"><div class="field"><label for="sN">Ism familiya (lotin)</label><input id="sN" required></div><div class="field"><label for="sL">Login (ixtiyoriy)</label><input id="sL" autocapitalize="none"></div><label class="row"><input id="sP" type="checkbox" checked style="width:20px;height:20px"> Ota-ona uchun ham login yaratish</label>${formBtns("Qo'shish")}</form>`);
+  if (a === 'newStudent') return modal(`<h2>O'quvchi qo'shish · ${esc(D.groups.find(g => g.id === id).name)}</h2><form id="sForm" data-id="${id}" class="stack"><div class="field"><label for="sN">Ism familiya (lotin)</label><input id="sN" required></div><div class="field"><label for="sL">Login (ixtiyoriy)</label><input id="sL" autocapitalize="none"></div>
+    <fieldset class="stack" style="border:1px solid var(--border);border-radius:12px;padding:12px;gap:8px"><legend style="font-weight:600;padding:0 6px">Ota-ona</legend>
+      <label class="row" style="gap:8px;flex-wrap:nowrap"><input type="radio" name="pm" value="new" checked style="width:18px;height:18px"> Yangi ota-ona logini yaratish</label>
+      <div class="field" data-pm="new"><input id="sPN" placeholder="Ota-ona ismi (ixtiyoriy), masalan: Karimova Dilnoza"></div>
+      <label class="row" style="gap:8px;flex-wrap:nowrap"><input type="radio" name="pm" value="old" style="width:18px;height:18px"> Mavjud ota-onaga biriktirish (aka-uka, opa-singil bo'lsa)</label>
+      <div class="field" data-pm="old" style="display:none"><input id="sPL" autocapitalize="none" placeholder="Ota-ona logini, masalan: ota.ali"></div>
+      <label class="row" style="gap:8px;flex-wrap:nowrap"><input type="radio" name="pm" value="none" style="width:18px;height:18px"> Hozircha kerak emas</label>
+    </fieldset>${formBtns("Qo'shish")}</form>`);
+  if (a === 'parents') { const s = D.students.find(x => x.profile_id === id); const nm = D.P[id]?.full_name || '';
+    modal(`<div class="between"><h2>👪 ${esc(nm)} — ota-onalari</h2><button class="btn sm o" data-act="close">Yopish</button></div><div id="parList" class="stack"><div class="muted">Yuklanmoqda…</div></div>
+    <form id="parLink" data-id="${id}" class="stack" style="border-top:1px solid var(--border);padding-top:12px"><b>Mavjud ota-onani biriktirish</b><p class="muted" style="margin:0;font-size:13px">Aka-uka yoki opa-singillar uchun: birinchi farzandning ota-ona logini (masalan <b>ota.ali</b>) — shunda ota-ona bitta login bilan barcha farzandlarini ko'radi.</p><div class="row"><input id="plL" autocapitalize="none" placeholder="ota.ali" style="flex:1;min-width:160px" required><button class="btn p" type="submit">Biriktirish</button></div></form>
+    <form id="parNew" data-id="${id}" class="stack" style="border-top:1px solid var(--border);padding-top:12px"><b>Yangi ota-ona logini yaratish</b><div class="row"><input id="pnN" placeholder="Ota-ona ismi (ixtiyoriy)" style="flex:1;min-width:160px"><button class="btn s" type="submit">Yaratish</button></div></form>`);
+    loadParents(id); return; }
+  if (a === 'unlinkPar') { if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Rostdanmi?'; return; }
+    try { await q(sb.rpc('unlink_parent', {p_parent: id, p_student: b.dataset.st})); toast('Ajratildi'); loadParents(b.dataset.st); } catch (err) { toast(err.message); } return; }
   if (a === 'newHw') { const gs = myGroups(); if (!gs.length) return toast('Avval guruh yarating'); const dv = new Date(Date.now() + 864e5 - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
     return modal(`<h2>Uy vazifa berish</h2><form id="hwForm" class="stack"><div class="field"><label for="hwG">Guruh</label><select id="hwG">${gs.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div><div class="field"><label for="hwT">Nomi</label><input id="hwT" placeholder="Writing: My family" required></div><div class="field"><label for="hwI">Shart (inglizcha)</label><textarea id="hwI" placeholder="Write 5 sentences about your family. Use am / is / are."></textarea></div><div class="field"><label for="hwD">Muddat</label><input id="hwD" type="datetime-local" value="${dv}"></div>${formBtns('Berish')}</form>`); }
   if (a === 'nextTopic') { const g = D.groups.find(x => x.id === id); try { await q(sb.from('groups').update({current_topic: (g.current_topic + 1) % TOPICS.length}).eq('id', id)); toast('Mavzu yangilandi'); load(); } catch (err) { toast(err.message); } return; }
@@ -637,7 +651,16 @@ document.addEventListener('click', async e => {
     if (i === x.a) chal.score++;
     setTimeout(() => { chal.i++; if (chal.i >= 3) finishChallenge(); else drawChallenge(); }, 700); return; }
 });
-document.addEventListener('change', e => { if (e.target.id === 'kidSel') { D.active = e.target.value; load(); } });
+document.addEventListener('change', e => {
+  if (e.target.id === 'kidSel') { D.active = e.target.value; load(); }
+  if (e.target.name === 'pm') document.querySelectorAll('[data-pm]').forEach(x => { x.style.display = x.dataset.pm === e.target.value ? '' : 'none'; });
+});
+async function loadParents(sid) {
+  const box = $('#parList'); if (!box) return;
+  try { const rows = await q(sb.rpc('student_parents', {p_student: sid}));
+    box.innerHTML = rows.length ? rows.map(r => `<div class="between"><div><b>${esc(r.full_name)}</b> <span class="muted">· ${esc(r.login)}</span><div class="muted" style="font-size:12px">Farzandlari: ${esc(r.children || '')}</div></div><button class="btn sm t" data-act="unlinkPar" data-id="${r.parent_id}" data-st="${sid}">Ajratish</button></div>`).join('') : `<div class="empty">Ota-ona biriktirilmagan</div>`;
+  } catch (e) { box.innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+}
 document.addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target; if (busy) return; busy = true;
   const btn = f.querySelector('[type=submit]'); if (btn) btn.disabled = true;
@@ -653,9 +676,18 @@ document.addEventListener('submit', async e => {
     if (f.id === 'atForm') { const ids = [...f.querySelectorAll('input:checked')].map(x => x.value); if (ids.length > 2) { toast("Ko'pi bilan 2 ta o'qituvchi"); return; } const cid = f.dataset.id;
       await q(sb.from('class_teachers').delete().eq('class_id', cid)); if (ids.length) await q(sb.from('class_teachers').insert(ids.map((t, i) => ({class_id: cid, teacher_id: t, is_primary: i === 0})))); closeModal(); load(); return; }
     if (f.id === 'gForm') { await q(sb.from('groups').insert({class_id: f.dataset.id, name: $('#gN').value.trim()})); closeModal(); toast('Guruh yaratildi'); load(); return; }
-    if (f.id === 'sForm') { const n = $('#sN').value.trim(); const u = await fn({role: 'student', full_name: n, login: $('#sL').value.trim(), group_id: f.dataset.id}); let extra = '';
-      if ($('#sP').checked) { const p = await fn({role: 'parent', full_name: n + 'ning ota-onasi', login: 'ota.' + u.login, child_id: u.id}); extra = credsBox(p, 'Ota-ona'); }
+    if (f.id === 'sForm') { const n = $('#sN').value.trim(); const pm = (f.querySelector('input[name=pm]:checked') || {}).value || 'new';
+      if (pm === 'old' && !$('#sPL').value.trim()) { toast('Ota-ona loginini yozing'); return; }
+      const u = await fn({role: 'student', full_name: n, login: $('#sL').value.trim(), group_id: f.dataset.id}); let extra = '';
+      try {
+        if (pm === 'new') { const p = await fn({role: 'parent', full_name: $('#sPN').value.trim() || n + 'ning ota-onasi', login: 'ota.' + u.login, child_id: u.id}); extra = credsBox(p, 'Ota-ona'); }
+        if (pm === 'old') { const r = await q(sb.rpc('link_parent', {p_login: $('#sPL').value.trim(), p_student: u.id})); extra = `<div class="ask"><b>Ota-ona biriktirildi</b><div>${esc(r.full_name)} (<b>${esc(r.login)}</b>)</div><span class="muted" style="font-size:13px">Endi u bitta login bilan ko'radi: ${esc(r.children)}</span></div>`; }
+      } catch (err) { extra = `<div class="ask" style="color:var(--bad)">O'quvchi qo'shildi, lekin ota-ona bog'lanmadi: ${esc(err.message)}. «👪 Ota-ona» tugmasi orqali qayta urinib ko'ring.</div>`; }
       modal(`<h2>${esc(n)} qo'shildi</h2>${credsBox(u, "O'quvchi")}${extra}<button class="btn p" data-act="closeReload">Tayyor</button>`); return; }
+    if (f.id === 'parLink') { const r = await q(sb.rpc('link_parent', {p_login: $('#plL').value.trim(), p_student: f.dataset.id})); toast(r.full_name + ' biriktirildi'); $('#plL').value = ''; loadParents(f.dataset.id); return; }
+    if (f.id === 'parNew') { const sid = f.dataset.id; const st = D.P[sid] || {};
+      const p = await fn({role: 'parent', full_name: $('#pnN').value.trim() || (st.full_name || '') + 'ning ota-onasi', login: 'ota.' + (st.login || 'user'), child_id: sid});
+      modal(`<h2>Ota-ona logini yaratildi</h2>${credsBox(p, 'Ota-ona')}<button class="btn p" data-act="closeReload">Tayyor</button>`); return; }
     if (f.id === 'hwForm') { const t = $('#hwT').value.trim(); if (!t) { toast('Vazifa nomini yozing'); return; }
       await q(sb.from('assignments').insert({type: 'written', title: t, instructions: $('#hwI').value.trim(), target_group_id: $('#hwG').value, due_at: new Date($('#hwD').value).toISOString(), created_by: me.id})); closeModal(); view = 'homework'; toast('Vazifa berildi'); load(); return; }
     if (f.id === 'watchForm') { const url = ytEmbed($('#wtU').value); if (!url) { toast("YouTube havolasi noto'g'ri"); return; }
