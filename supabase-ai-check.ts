@@ -25,7 +25,7 @@ Student's answer:
 ${answer.slice(0, 4000)}
 """
 Grade it from 0 to 100 (task completion 40%, grammar 30%, vocabulary & spelling 20%, length/effort 10%). Be encouraging but honest.
-Return ONLY JSON: {"score": <int 0-100>, "feedback": "<2-3 short sentences in simple English: one thing done well, the main mistake with the correct form, one next step>", "mistakes": [{"item": "<wrong text>", "correction": "<correct text>", "topic": "<grammar topic>"}]}
+Return ONLY JSON: {"score": <int 0-100>, "feedback": "<2-3 short sentences in simple English: one thing done well, the main mistake with the correct form, one next step>", "feedback_uz": "<the same feedback for the PARENT, 1-2 short sentences in simple Uzbek (Latin script)>", "mistakes": [{"item": "<wrong text>", "correction": "<correct text>", "topic": "<grammar topic>"}]}
 If the answer is empty, not English, or unrelated to the task, give a low score and say so.`;
 
 async function gemini(prompt: string) {
@@ -57,6 +57,17 @@ Deno.serve(async (req) => {
   if (!u) return j({ error: "Kirish kerak" }, 401);
   let body: any; try { body = await req.json(); } catch { return j({ error: "JSON xato" }, 400); }
   const sid = String(body.submission_id ?? "");
+  if (body.translate) {
+    // O'qituvchi tasdiqlagan izohni ota-ona uchun o'zbekchaga o'girish (faqat o'z o'quvchisi)
+    const { data: g } = await user.from("submission_grades").select("submission_id, final_feedback, final_score").eq("submission_id", sid).maybeSingle();
+    if (!g?.final_feedback) return j({ error: "Izoh topilmadi" }, 404);
+    try {
+      const r = await gemini(`Translate this English teacher feedback for a 10-12 year old student into simple Uzbek (Latin script) for the PARENT, 1-2 short sentences, keep English words/examples in quotes. Score: ${g.final_score}/100. Feedback: "${String(g.final_feedback).slice(0, 800)}". Return ONLY JSON: {"feedback_uz": "..."}`);
+      const uz = String(r.feedback_uz ?? "").slice(0, 600);
+      await admin.from("submission_grades").update({ feedback_uz: uz }).eq("submission_id", sid);
+      return j({ feedback_uz: uz });
+    } catch (e) { return j({ error: String(e).slice(0, 150) }, 502); }
+  }
   // RLS orqali: foydalanuvchi bu ishni ko'ra olishi shart (o'z ishi yoki o'z o'quvchisi)
   const { data: sub } = await user.from("submissions").select("id, student_id, text_answer, status, assignment_id").eq("id", sid).maybeSingle();
   if (!sub) return j({ error: "Ish topilmadi" }, 404);
@@ -67,7 +78,8 @@ Deno.serve(async (req) => {
     const r = await gemini(PROMPT(a?.title ?? "", a?.instructions ?? "", sub.text_answer));
     const score = Math.max(0, Math.min(100, Math.round(Number(r.score) || 0)));
     const feedback = String(r.feedback ?? "").slice(0, 800);
-    await admin.from("submission_grades").upsert({ submission_id: sub.id, ai_score: score, ai_feedback: feedback, ai_checked_at: new Date().toISOString() });
+    const feedbackUz = String(r.feedback_uz ?? "").slice(0, 600) || null;
+    await admin.from("submission_grades").upsert({ submission_id: sub.id, ai_score: score, ai_feedback: feedback, feedback_uz: feedbackUz, ai_checked_at: new Date().toISOString() });
     await admin.from("submissions").update({ status: "ai_checked" }).eq("id", sub.id).in("status", ["submitted"]);
     const ms = Array.isArray(r.mistakes) ? r.mistakes.slice(0, 5) : [];
     if (ms.length) await admin.from("student_mistakes").insert(ms.filter((m: any) => m?.item).map((m: any) => ({ student_id: sub.student_id, topic: String(m.topic ?? "general").slice(0, 80), item: String(m.item).slice(0, 200), correction: String(m.correction ?? "").slice(0, 200), source_submission_id: sub.id })));

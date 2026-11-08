@@ -75,10 +75,23 @@ const quizOf = i => (TOPICS[i] && TOPICS[i].quiz && TOPICS[i].quiz.length) ? TOP
 function pickChallenge(topic) {
   let pool = shuffle(quizOf(topic));
   if (!pool.length) pool = shuffle(BANK);
+  // Xatolar daftaridan: avval xato qilingan savol qayta so'raladi
+  const ms = shuffle((D.mistakes || []).filter(m => m.topic === 'challenge').map(m => { try { const x = JSON.parse(m.item); return x && x.o ? {q: x.q, o: x.o, a: x.a, mistake_id: m.id, fromMistake: true} : null; } catch (e) { return null; } }).filter(Boolean));
+  if (ms.length) return [...pool.slice(0, 2), ms[0]];
   const prev = []; for (let i = 0; i < topic; i++) prev.push(...quizOf(i));
   const rev = shuffle(prev);
   if (!rev.length) return pool.slice(0, 3); // birinchi mavzu: hammasi joriy mavzudan
   return [...pool.slice(0, 2), {...rev[0], review: true}];
+}
+function mistakesCard() {
+  const ms = D.mistakes || []; if (!ms.length) return `<div class="card stack"><b>📒 Xatolarim</b><div class="muted" style="font-size:13px">Xato yo'q — zo'r! 🎉 Challenge, test va uy vazifadagi xatolar shu yerga tushadi.</div></div>`;
+  const row = m => { let q = m.item; try { const x = JSON.parse(m.item); if (x && x.q) q = x.q; } catch (e) {}
+    return `<div class="between" style="border-top:1px solid var(--border);padding-top:8px"><div style="min-width:0"><div style="font-size:14px">❌ ${esc(q)}</div><div style="font-size:13px;color:var(--ok)">✅ ${esc(m.correction || '')}</div></div><button class="btn sm s" data-act="mistakeOk" data-id="${m.id}">O'rgandim</button></div>`; };
+  return `<div class="card stack"><div class="between"><b>📒 Xatolarim</b><span class="muted">${ms.length} ta</span></div><div class="muted" style="font-size:12px">Daily Challenge bu savollarni qayta so'raydi. To'g'ri javob bersangiz, o'zi o'chadi.</div>${ms.slice(0, 10).map(row).join('')}</div>`;
+}
+function compCard(highlightIds) {
+  const c = D.comp || []; if (c.length < 1) return '';
+  return `<section class="card stack"><h2 style="font-size:18px">🏁 Sinflar musobaqasi</h2><p class="muted" style="margin:0;font-size:13px">Sinf o'quvchilarining o'rtacha bali. Hamma birga harakat qilsa, sinf yuqoriga chiqadi!</p><div class="lb">${c.map(x => `<div class="lb-row ${highlightIds && highlightIds.includes(x.class_id) ? 'me' : ''}"><span class="medal" style="background:${medal(x.rnk - 1)}">${x.rnk}</span><span class="n">${esc(x.class_name)} <span class="muted" style="font-size:12px;font-weight:500">· ${x.students} o'quvchi · 🔥 ${x.challenge_days}</span></span><b class="num">${Number(x.avg_score)}</b></div>`).join('')}</div></section>`;
 }
 /* O'quv dasturi (curriculum) = namuna darslar, Unit va dars tartibida */
 async function loadCurriculum() {
@@ -138,6 +151,14 @@ async function aiCheck(submissionId, quiet) {
   } catch (e) { if (!quiet) toast('AI bilan aloqa yo\'q'); return null; }
 }
 
+async function aiTranslate(submissionId) {
+  try { const { data: { session } } = await sb.auth.getSession();
+    await fetch(SB_URL + '/functions/v1/ai-check', {method: 'POST', headers: {'Content-Type': 'application/json', apikey: SB_KEY, Authorization: 'Bearer ' + session.access_token}, body: JSON.stringify({submission_id: submissionId, translate: true})});
+  } catch (e) { /* jim */ }
+}
+const rec = {mr: null, blob: null, t: null, sec: 0};
+const attachBtns = s => [...(s.file_paths || []).map((p, i) => `<button class="btn sm o" type="button" data-act="openFile" data-path="${esc(p)}">📎 Fayl ${i + 1}</button>`), s.voice_path ? `<button class="btn sm o" type="button" data-act="openFile" data-path="${esc(s.voice_path)}">🎤 Ovozni tinglash</button>` : ''].join('');
+
 /* ---------------- loading ---------------- */
 async function boot() {
   const { data: { session } } = await sb.auth.getSession();
@@ -185,7 +206,13 @@ async function loadStaff() {
     safe(sb.from('weekly_group_leaderboard').select('*').order('week_start', {ascending:false}).limit(200)),
     safe(sb.from('hall_of_fame').select('*').order('month', {ascending:false}).limit(30))
   ]);
-  D = {classes, ct, groups, students, P, assignments, subs, score, lessons, feedback, ann, sessions, att, wt, wtr, badges, sbadges, boxes, weekly, hof};
+  const [comp, obs, trainings, tatt] = await Promise.all([
+    safe(sb.rpc('class_competition')),
+    safe(sb.from('observations').select('*').order('observed_on', {ascending:false})),
+    safe(sb.from('trainings').select('*').order('starts_at', {ascending:false})),
+    safe(sb.from('training_attendance').select('*'))
+  ]);
+  D = {classes, ct, groups, students, P, assignments, subs, score, lessons, feedback, ann, sessions, att, wt, wtr, badges, sbadges, boxes, weekly, hof, comp, obs, trainings, tatt};
 }
 async function loadStudent() {
   const st = await q(sb.from('students').select('*').eq('profile_id', me.id).maybeSingle());
@@ -210,7 +237,12 @@ async function loadStudent() {
     safe(sb.from('student_badges').select('*').eq('student_id', me.id)),
     safe(sb.from('mystery_box_openings').select('*, mystery_box_rewards(title_uz, description)').eq('student_id', me.id).order('opened_at', {ascending:false}))
   ]);
-  D = {group, assignments, subs, grades, streak, todayCh, board, lessons, ann, sessions, wt, wtr, badges, sbadges, boxes};
+  const [mistakes, mentors, comp] = await Promise.all([
+    safe(sb.from('student_mistakes').select('*').eq('student_id', me.id).eq('is_resolved', false).order('created_at', {ascending:false}).limit(50)),
+    group ? safe(sb.rpc('group_mentors', {p_group: group.id})) : [],
+    safe(sb.rpc('class_competition'))
+  ]);
+  D = {group, assignments, subs, grades, streak, todayCh, board, lessons, ann, sessions, wt, wtr, badges, sbadges, boxes, mistakes, mentors, comp, isMentor: !!st?.is_mentor};
 }
 async function loadParent() {
   const links = await q(sb.from('parent_students').select('student_id').eq('parent_id', me.id));
@@ -236,8 +268,10 @@ async function loadParent() {
     safe(sb.from('live_sessions').select('*').eq('group_id', kid.group_id).order('starts_at')),
     safe(sb.from('attendance').select('*').eq('student_id', active))
   ]);
-  const [badges, sbadges] = await Promise.all([safe(sb.from('badges').select('*')), safe(sb.from('student_badges').select('*').eq('student_id', active))]);
-  D = {kids, active, kid, group, assignments, subs, grades, streak, board, ann, sessions, att, badges, sbadges};
+  const [badges, sbadges, uzr] = await Promise.all([safe(sb.from('badges').select('*')), safe(sb.from('student_badges').select('*').eq('student_id', active)),
+    subs.length ? safe(sb.from('submission_grades').select('submission_id, feedback_uz').in('submission_id', subs.map(s => s.id)).not('feedback_uz', 'is', null)) : []]);
+  const uz = Object.fromEntries(uzr.map(x => [x.submission_id, x.feedback_uz]));
+  D = {kids, active, kid, group, assignments, subs, grades, streak, board, ann, sessions, att, badges, sbadges, uz};
 }
 
 /* ---------------- staff helpers ---------------- */
@@ -280,12 +314,12 @@ function loginView() {
 function staff() {
   const head = me.role === 'head_teacher';
   const items = head
-    ? [['home','Bosh sahifa'],['teachers',"O'qituvchilar"],['classes','Sinflar'],['lessons','Namuna darslar'],['live','Jonli darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['watch','Watching Time'],['announce',"E'lonlar"],['awards','Nishonlar'],['rating','Reyting'],['feedback','Fikrlar']]
-    : [['home','Bosh sahifa'],['classes','Mening sinflarim'],['lessons','Darslarim'],['live','Jonli darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['watch','Watching Time'],['announce',"E'lonlar"],['awards','Nishonlar'],['rating','Reyting']];
+    ? [['home','Bosh sahifa'],['teachers',"O'qituvchilar"],['classes','Sinflar'],['lessons','Namuna darslar'],['live','Jonli darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['watch','Watching Time'],['announce',"E'lonlar"],['awards','Nishonlar'],['rating','Reyting'],['observe','Dars kuzatuvi'],['trainings','Treninglar'],['report','Hisobotlar'],['feedback','Fikrlar']]
+    : [['home','Bosh sahifa'],['classes','Mening sinflarim'],['lessons','Darslarim'],['live','Jonli darslar'],['homework','Uy vazifalar'],['check','Tekshirish'],['watch','Watching Time'],['announce',"E'lonlar"],['awards','Nishonlar'],['rating','Reyting'],['observe','Kuzatuvlarim'],['trainings','Treninglar'],['report','Hisobot']];
   if (!view || !items.some(i => i[0] === view)) view = 'home';
   const pc = pending().length;
   const nav = items.map(([k, l]) => `<button class="nav ${view === k ? 'on' : ''}" data-nav="${k}">${l}${k === 'check' && pc ? `<span class="pill p-warn">${pc}</span>` : ''}</button>`).join('');
-  const body = ({home: head ? headHome : teacherHome, teachers: headTeachers, classes: classesView, lessons: lessonsView, homework: homeworkView, check: checkView, rating: ratingView, feedback: feedbackView, announce: announceView, live: liveView, watch: watchView, awards: awardsView})[view]();
+  const body = ({home: head ? headHome : teacherHome, teachers: headTeachers, classes: classesView, lessons: lessonsView, homework: homeworkView, check: checkView, rating: ratingView, feedback: feedbackView, announce: announceView, live: liveView, watch: watchView, awards: awardsView, observe: observeView, trainings: trainingsView, report: reportView})[view]();
   return `<div class="shell"><aside class="side"><div class="brand" style="color:var(--primary)">${STAR}<b>NORTHSTAR</b></div>${nav}
     <div class="me"><b>${esc(me.full_name)}</b><div class="muted">${ROLE_UZ[me.role]} · ${esc(me.login)}</div><div class="row" style="margin-top:8px;gap:6px"><button class="btn sm o" data-act="pwOpen">Parol</button><button class="btn sm o" data-act="tgLink" title="Telegram'ga ulash">📲</button><button class="btn sm o" data-act="logout">Chiqish</button></div></div></aside>
     <div class="topbar">${nav}<button class="nav" data-act="logout">Chiqish</button></div>
@@ -430,7 +464,7 @@ function classesView() {
   ${cs.length ? cs.map(c => `<section class="card stack"><div class="between"><div><h2 style="font-size:20px">${esc(c.name)}</h2><div class="muted" style="font-size:13px">${classTeachers(c.id).map(t => esc(t.full_name)).join(', ') || "O'qituvchi biriktirilmagan"}</div></div>
      <div class="row">${head ? `<button class="btn sm s" data-act="assignTeacher" data-id="${c.id}">O'qituvchi biriktirish</button>` : ''}<button class="btn sm o" data-act="newGroup" data-id="${c.id}">+ Guruh</button></div></div>
      ${classGroups(c.id).map(g => `<div class="stack" style="border-top:1px solid var(--border);padding-top:12px"><div class="between"><b>${esc(g.name)}</b><div class="row"><span class="muted" style="font-size:13px">Mavzu: ${esc(TOPICS[g.current_topic % TOPICS.length].t)}</span><button class="btn sm o" data-act="nextTopic" data-id="${g.id}">Keyingi mavzu</button><button class="btn sm s" data-act="newStudent" data-id="${g.id}">+ O'quvchi</button></div></div>
-       ${groupStudents(g.id).length ? `<div class="tbl-wrap"><table><tr><th>O'quvchi</th><th>Login</th><th>Holat</th><th>Ball</th><th>Streak</th><th></th></tr>${groupStudents(g.id).map(s => { const x = stStatus(s.profile_id, g.id); const sc = D.score[s.profile_id] || {}; return `<tr><td><b>${esc(D.P[s.profile_id]?.full_name)}</b></td><td class="muted">${esc(D.P[s.profile_id]?.login)}</td><td><span class="pill p-${x[0]}">${esc(x[1])}</span></td><td class="num">${sc.score ?? '—'}</td><td class="num">${sc.streak ?? 0}</td><td><button class="btn sm o" data-act="parents" data-id="${s.profile_id}">👪 Ota-ona</button></td></tr>`; }).join('')}</table></div>` : `<div class="empty">Guruhda o'quvchi yo'q</div>`}</div>`).join('') || `<div class="muted">Guruh yo'q — «+ Guruh» tugmasini bosing.</div>`}</section>`).join('') : `<div class="empty">${head ? "Hali sinf yo'q." : 'Sizga hali sinf biriktirilmagan. Head teacherga murojaat qiling.'}</div>`}`;
+       ${groupStudents(g.id).length ? `<div class="tbl-wrap"><table><tr><th>O'quvchi</th><th>Login</th><th>Holat</th><th>Ball</th><th>Streak</th><th></th></tr>${groupStudents(g.id).map(s => { const x = stStatus(s.profile_id, g.id); const sc = D.score[s.profile_id] || {}; return `<tr><td><b>${esc(D.P[s.profile_id]?.full_name)}</b></td><td class="muted">${esc(D.P[s.profile_id]?.login)}</td><td><span class="pill p-${x[0]}">${esc(x[1])}</span></td><td class="num">${sc.score ?? '—'}</td><td class="num">${sc.streak ?? 0}</td><td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm o" data-act="parents" data-id="${s.profile_id}">👪 Ota-ona</button><button class="btn sm ${s.is_mentor ? 'g' : 'o'}" data-act="mentor" data-id="${s.profile_id}" title="Mentor qilish">🌟${s.is_mentor ? ' Mentor' : ''}</button></div></td></tr>`; }).join('')}</table></div>` : `<div class="empty">Guruhda o'quvchi yo'q</div>`}</div>`).join('') || `<div class="muted">Guruh yo'q — «+ Guruh» tugmasini bosing.</div>`}</section>`).join('') : `<div class="empty">${head ? "Hali sinf yo'q." : 'Sizga hali sinf biriktirilmagan. Head teacherga murojaat qiling.'}</div>`}`;
 }
 function homeworkView() {
   const gids = new Set(myGroups().map(g => g.id));
@@ -446,7 +480,8 @@ function checkView() {
   ${list.length ? list.map(s => { const a = D.assignments.find(x => x.id === s.assignment_id); const g0 = s.submission_grades; const g = (Array.isArray(g0) ? g0[0] : g0) || {};
     return `<div class="card stack"><div class="between"><b>${esc(D.P[s.student_id]?.full_name)} · ${esc(a?.title)}</b><span class="row" style="gap:6px">${g.ai_score != null ? `<span class="pill p-info">🤖 AI: ${g.ai_score}</span>` : ''}${s.is_late ? '<span class="pill p-warn">Kechikkan</span>' : ''}</span></div>
     ${g.ai_feedback ? `<div class="ask" style="font-size:14px"><b style="color:var(--primary)">🤖 AI taklifi</b><div>${esc(g.ai_feedback)}</div><span class="muted" style="font-size:12px">Ball va izoh pastga qo'yildi — o'zgartirib tasdiqlashingiz mumkin.</span></div>` : `<button class="btn sm s" style="justify-self:start" data-act="aiRun" data-id="${s.id}">🤖 AI bilan tekshirish</button>`}
-    <div style="white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12px">${esc(s.text_answer)}</div>
+    ${s.text_answer ? `<div style="white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12px">${esc(s.text_answer)}</div>` : ''}
+    ${attachBtns(s) ? `<div class="row" style="gap:6px">${attachBtns(s)}</div>` : ''}
     <div class="row"><div class="field" style="width:120px"><label for="sc_${s.id}">Ball (0–100)</label><input id="sc_${s.id}" type="number" min="0" max="100" value="${g.ai_score ?? ''}"></div>
      <div class="field" style="flex:1;min-width:220px"><label for="fb_${s.id}">Izoh (keyingi qadam)</label><input id="fb_${s.id}" value="${esc(g.ai_feedback || '')}" placeholder="Masalan: Check Past Simple -ed endings."></div></div>
     <div class="row"><button class="btn sm p" data-act="approve" data-id="${s.id}">Tasdiqlash</button><button class="btn sm t" data-act="return" data-id="${s.id}">Qayta ishlashga qaytarish</button></div></div>`; }).join('') : `<div class="empty">Tekshiriladigan ish yo'q.</div>`}
@@ -458,14 +493,49 @@ function checkedHistory() {
   if (!done.length) return '';
   return `<h2 style="font-size:18px">Tekshirilganlar (oxirgi ${done.length} ta)</h2>${done.map(s => { const a = D.assignments.find(x => x.id === s.assignment_id); const g0 = s.submission_grades; const g = (Array.isArray(g0) ? g0[0] : g0) || {};
     return `<details class="card"><summary class="between" style="cursor:pointer;list-style:none"><b>${esc(D.P[s.student_id]?.full_name)} · ${esc(a?.title)}</b><span>${s.status === 'approved' ? `<span class="pill p-ok">${g.final_score ?? '—'} ball</span>` : '<span class="pill p-bad">Qaytarilgan</span>'}</span></summary>
-    <div class="stack" style="margin-top:10px"><div style="white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12px">${esc(s.text_answer)}</div>${g.final_feedback ? `<div class="muted" style="font-size:14px">Izoh: "${esc(g.final_feedback)}"</div>` : ''}${g.approved_at ? `<div class="muted" style="font-size:12px">${fmt(g.approved_at)}</div>` : ''}</div></details>`; }).join('')}`;
+    <div class="stack" style="margin-top:10px">${s.text_answer ? `<div style="white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12px">${esc(s.text_answer)}</div>` : ''}${attachBtns(s) ? `<div class="row" style="gap:6px">${attachBtns(s)}</div>` : ''}${g.feedback_uz ? `<div class="muted" style="font-size:13px">🇺🇿 Ota-onaga: ${esc(g.feedback_uz)}</div>` : ''}${g.final_feedback ? `<div class="muted" style="font-size:14px">Izoh: "${esc(g.final_feedback)}"</div>` : ''}${g.approved_at ? `<div class="muted" style="font-size:12px">${fmt(g.approved_at)}</div>` : ''}</div></details>`; }).join('')}`;
 }
 function ratingView() {
   return `<h1 style="font-size:28px">Reyting</h1><p class="muted" style="margin:0">Haftalik ball: vazifa bajarilishi 30%, sifati 30%, Daily Challenge 20%, faollik 20% + streak bonusi (maks. 100).</p>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">${myClasses().map(c => { const r = Object.values(D.score).filter(x => x.class_id === c.id).sort((a, b) => b.score - a.score); const avg = r.length ? Math.round(r.reduce((a, x) => a + Number(x.score), 0) / r.length) : 0;
     return `<section class="card stack"><div class="between"><h2 style="font-size:18px">${esc(c.name)}</h2><span class="muted" style="font-size:13px">o'rtacha <b class="num" style="color:var(--text)">${avg}</b></span></div><div class="lb">${r.slice(0, 3).map((x, i) => `<div class="lb-row"><span class="medal" style="background:${medal(i)}">${i + 1}</span><span class="n">${esc(x.full_name)}</span><b class="num">${x.score}</b></div>`).join('') || `<div class="empty">O'quvchi yo'q</div>`}</div></section>`; }).join('') || `<div class="empty">Sinf yo'q</div>`}</div>
+  ${compCard(myClasses().map(c => c.id))}
   ${weeklyHistory()}`;
 }
+const OBS_K = [['goal_clarity', 'Dars maqsadi aniqligi'], ['talk_time_ratio', "O'quvchi gapirish vaqti"], ['student_engagement', "O'quvchilar faolligi"], ['feedback_quality', 'Izoh (feedback) sifati'], ['time_management', 'Vaqtni boshqarish']];
+function observeView() {
+  const head = me.role === 'head_teacher';
+  const list = (D.obs || []).filter(o => head || o.teacher_id === me.id);
+  const teachers = Object.values(D.P).filter(p => p.role === 'teacher');
+  return `<div class="between"><h1 style="font-size:28px">${head ? 'Dars kuzatuvi' : 'Kuzatuvlarim'}</h1>${head ? '<button class="btn p" data-act="newObs">+ Kuzatuv varaqasi</button>' : ''}</div>
+  <p class="muted" style="margin:0">${head ? "Darsni 5 mezon bo'yicha (1–5) baholang va keyingi qadamni yozing. O'qituvchi o'z natijasini ko'radi." : "Head teacher darslaringizni kuzatgan natijalar va keyingi qadamlar."}</p>
+  ${head && teachers.length ? `<section class="card stack"><h2 style="font-size:18px">O'qituvchilar bo'yicha o'rtacha</h2>${teachers.map(t => { const os = (D.obs || []).filter(o => o.teacher_id === t.id); const av = os.length ? (os.reduce((a, o) => a + Number(o.average_score), 0) / os.length).toFixed(1) : '—';
+    return `<div class="between"><span>${esc(t.full_name)}</span><span class="num"><b>${av}</b> <span class="muted">/ 5 · ${os.length} ta</span></span></div>`; }).join('')}</section>` : ''}
+  ${list.length ? list.map(o => `<div class="card stack"><div class="between"><b>${esc(D.P[o.teacher_id]?.full_name || '')}</b><span class="pill p-info">${fmt(o.observed_on).split(',')[0]} · o'rtacha ${Number(o.average_score).toFixed(1)}</span></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:6px 24px">${OBS_K.map(([k, l]) => `<div class="between" style="font-size:14px;flex-wrap:nowrap"><span class="muted">${l}</span><b>${'★'.repeat(o[k])}${'☆'.repeat(5 - o[k])}</b></div>`).join('')}</div>
+    ${o.comment ? `<div style="font-size:14px">💬 ${esc(o.comment)}</div>` : ''}${o.next_step ? `<div style="font-size:14px;color:var(--primary)">➡️ Keyingi qadam: ${esc(o.next_step)}</div>` : ''}</div>`).join('') : `<div class="empty">Hali kuzatuv yo'q.</div>`}`;
+}
+function trainingsView() {
+  const head = me.role === 'head_teacher'; const teachers = Object.values(D.P).filter(p => p.role === 'teacher');
+  const ts = D.trainings || [];
+  return `<div class="between"><h1 style="font-size:28px">Treninglar</h1>${head ? '<button class="btn p" data-act="newTraining">+ Trening</button>' : ''}</div>
+  <p class="muted" style="margin:0">O'qituvchilar uchun metodik treninglar.${head ? ' Davomatni trening kartasida belgilang.' : ''}</p>
+  ${ts.length ? ts.map(t => { const att = (D.tatt || []).filter(a => a.training_id === t.id); const mine = att.find(a => a.teacher_id === me.id); const up = new Date(t.starts_at) > new Date(Date.now() - 2 * 36e5);
+    return `<div class="card stack"><div class="between"><b>🎓 ${esc(t.title)}</b><span class="pill ${up ? 'p-ok' : 'p-info'}">${fmt(t.starts_at)}</span></div>${t.description ? `<div class="muted" style="white-space:pre-wrap;font-size:14px">${esc(t.description)}</div>` : ''}
+    ${t.google_meet_url && up ? `<a class="btn sm g" style="justify-self:start" href="${esc(t.google_meet_url)}" target="_blank" rel="noopener">🎥 Meet'ga kirish</a>` : ''}
+    ${head ? `<details><summary class="muted" style="cursor:pointer">Davomat: ${att.filter(a => a.status !== 'absent').length}/${teachers.length}</summary><div class="stack" style="margin-top:8px">${teachers.map(x => { const a = att.find(r => r.teacher_id === x.id);
+      return `<div class="between"><span>${esc(x.full_name)}</span><div class="row" style="gap:6px">${['present', 'late', 'absent'].map(k => `<button class="btn sm ${a?.status === k ? 'p' : 'o'}" data-act="tatt" data-id="${t.id}" data-st="${x.id}" data-k="${k}">${ATT_UZ[k]}</button>`).join('')}</div></div>`; }).join('') || '<div class="muted">O\'qituvchi yo\'q</div>'}</div></details>`
+      : mine ? `<span class="pill p-${mine.status === 'absent' ? 'bad' : 'ok'}" style="justify-self:start">${ATT_UZ[mine.status]}</span>` : ''}</div>`; }).join('') : `<div class="empty">Hali trening yo'q.</div>`}`;
+}
+function reportView() {
+  const now = new Date(); const mv = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  return `<h1 style="font-size:28px">Hisobotlar</h1><p class="muted" style="margin:0">Oylik hisobot: har bir o'quvchi bo'yicha ball, streak, uy vazifalar, Daily Challenge, jonli darslar davomati va nishonlar. Excel'da ochiladi yoki PDF qilib chop etiladi (ota-onalar yig'ilishi uchun qulay).</p>
+  <section class="card stack"><div class="row"><div class="field" style="width:200px"><label for="rpM">Oy</label><input id="rpM" type="month" value="${mv}"></div></div>
+  <div class="row"><button class="btn p" data-act="repCsv">📥 Excel (CSV) yuklab olish</button><button class="btn s" data-act="repPdf">🖨 PDF / chop etish</button></div></section>`;
+}
+async function monthlyRows() { const m = ($('#rpM')?.value || '') + '-01'; return {m, rows: await q(sb.rpc('monthly_report', {p_month: m}))}; }
+const REP_H = ['Sinf', 'Guruh', "O'quvchi", 'Login', 'Ball', 'Streak', 'Vazifa berilgan', 'Topshirgan', "O'rtacha baho", 'Challenge kun', 'Jonli darslar', 'Qatnashgan', 'Nishonlar'];
+const repVals = r => [r.class_name, r.group_name, r.student, r.login, r.score ?? '', r.streak ?? 0, r.hw_given, r.hw_done, r.hw_avg ?? '', r.challenge_days, r.sessions, r.attended, r.badges];
 
 /* student */
 function studentView() {
@@ -483,6 +553,8 @@ function studentView() {
     ${(() => { const nx = (D.sessions || []).find(s => sessionEnd(s) >= Date.now()); return nx ? liveCard(nx, false, 'KEYINGI JONLI DARS') : ''; })()}
     ${(D.ann || []).slice(0, 2).map(annCard).join('')}
     ${watchCard()}
+    ${D.isMentor ? `<div class="card row" style="gap:10px"><span style="font-size:28px">🌟</span><div><b>Siz guruh mentorisiz!</b><div class="muted" style="font-size:13px">Qiynalayotgan sinfdoshlaringizga yordam bering — har yordam uchun bonus olasiz.</div></div></div>`
+      : (D.mentors || []).length ? `<div class="card stack" style="gap:6px"><b>🌟 Guruh mentorlari</b><div class="muted" style="font-size:13px">Tushunmagan joyingiz bo'lsa, ulardan so'rang: ${(D.mentors || []).map(m => esc(m.full_name)).join(', ')}</div></div>` : ''}
     <div class="hero-card"><div style="font-size:12px;font-weight:600;letter-spacing:.06em;opacity:.8">DAILY CHALLENGE · 1 DAQIQA</div><div style="font-size:17px;font-weight:700">${D.todayCh ? 'Bugungi challenge bajarildi ✓ (' + D.todayCh.score + '/3)' : '3 ta savol — streakni saqlang'}</div>${D.todayCh ? '' : '<button class="btn" style="background:#fff;color:#1746A2" data-act="challenge">Boshlash</button>'}</div>
     <div class="card stack"><div class="between"><b>Vazifalar</b><span class="muted">${open.length} ta</span></div>${open.slice(0, 3).map(a => `<div class="between"><div><div style="font-weight:600">${esc(a.title)}</div><div style="font-size:12px;font-weight:600;color:${a.due_at && new Date(a.due_at) < new Date() ? 'var(--bad)' : 'var(--warn)'}">${fmt(a.due_at)} gacha</div></div><button class="btn sm s" data-act="submit" data-id="${a.id}">Topshirish</button></div>`).join('') || (waiting.length ? '' : '<div class="muted">Hamma vazifa topshirilgan 🎉</div>')}
     ${waiting.map(a => `<div class="between"><div style="font-weight:600">${esc(a.title)}</div><span class="pill p-info">Tekshirilmoqda</span></div>`).join('')}</div>
@@ -493,14 +565,14 @@ function studentView() {
   } else if (view === 'results') {
     const res = D.grades.filter(x => x.status === 'approved');
     const mine = D.board.find(x => x.student_id === me.id);
-    body = `<h1 style="font-size:24px">Natijalar</h1><div class="kpis">${kpi('Haftalik ball', mine ? mine.score : '—')}${kpi('Streak', k)}</div>${rewardsCard()}
+    body = `<h1 style="font-size:24px">Natijalar</h1><div class="kpis">${kpi('Haftalik ball', mine ? mine.score : '—')}${kpi('Streak', k)}</div>${rewardsCard()}${mistakesCard()}
     ${res.map(x => `<div class="card stack"><div class="between"><b>${esc(D.assignments.find(a => a.id === x.assignment_id)?.title)}</b><b class="num" style="color:var(--ok)">${x.final_score}/100</b></div><div class="muted">"${esc(x.final_feedback)}"</div></div>`).join('') || `<div class="empty">Baholangan ish hali yo'q.</div>`}`;
   } else if (view === 'lessons') {
     const cur = (g?.current_topic || 0) % TOPICS.length;
     const opened = new Set(TOPICS.slice(0, cur + 1).map(x => x.id).filter(Boolean));
     const ls = D.lessons.filter(l => !l.is_template || !TOPICS[0].id || opened.has(l.id)).sort((a, b) => (opened.has(b.id) ? TOPICS.findIndex(x => x.id === b.id) : 999) - (opened.has(a.id) ? TOPICS.findIndex(x => x.id === a.id) : 999));
     body = `<h1 style="font-size:24px">Darslar</h1><p class="muted" style="margin:0;font-size:13px">O'tilgan va hozirgi mavzu darslari. Yangi mavzu ochilganda bu yerda paydo bo'ladi.</p>${ls.map(l => lessonCard(l)).join('') || `<div class="empty">O'qituvchingiz hali dars qo'shmagan.</div>`}`;
-  } else body = boardHtml(D.board, me.id, 'Reyting · ' + (g?.name || ''));
+  } else body = boardHtml(D.board, me.id, 'Reyting · ' + (g?.name || '')) + compCard(g ? [g.class_id] : []);
   return phoneShell(body, [['home','Bosh',ICON.home],['lessons','Darslar',ICON.book],['tasks','Vazifa',ICON.task],['results','Natija',ICON.cup],['rating','Reyting',ICON.star]]);
 }
 function boardHtml(board, selfId, title) {
@@ -521,7 +593,7 @@ function parentView() {
     const nx = (D.sessions || []).find(s => sessionEnd(s) >= Date.now());
     body += `${nx ? liveCard(nx, false, 'KEYINGI JONLI DARS') : ''}${(D.ann || []).slice(0, 2).map(annCard).join('')}<div class="card stack"><div class="muted" style="font-size:12px;font-weight:600;letter-spacing:.06em">HOZIRGI MAVZU${tp.unit ? ' · ' + esc(tp.unit) : ''}</div><b style="font-size:16px">${esc(tp.t)}</b></div>
     <div class="ask"><b style="color:var(--primary)">Farzandingizdan so'rang</b>${tp.ask.map((x, i) => `<div><b>${i + 1}.</b> ${esc(x[0])} <span class="muted">— ${esc(x[1])}</span></div>`).join('')}</div>
-    <div class="card stack"><div class="between"><span>${last ? esc(last.title) : "Vazifa yo'q"}</span>${last ? (lg ? `<span class="pill p-ok">Baholandi · ${lg.final_score}</span>` : ls ? '<span class="pill p-info">Topshirildi</span>' : '<span class="pill p-warn">Topshirilmagan</span>') : ''}</div>${lg ? `<div class="muted" style="font-size:14px">O'qituvchi: "${esc(lg.final_feedback)}"</div>` : ''}</div>`;
+    <div class="card stack"><div class="between"><span>${last ? esc(last.title) : "Vazifa yo'q"}</span>${last ? (lg ? `<span class="pill p-ok">Baholandi · ${lg.final_score}</span>` : ls ? '<span class="pill p-info">Topshirildi</span>' : '<span class="pill p-warn">Topshirilmagan</span>') : ''}</div>${lg ? `<div class="muted" style="font-size:14px">O'qituvchi: "${esc(lg.final_feedback)}"</div>${(D.uz || {})[lg.submission_id] ? `<div class="ask" style="font-size:14px;padding:10px"><b>🇺🇿 O'zbekcha:</b> ${esc(D.uz[lg.submission_id])}</div>` : ''}` : ''}</div>`;
   } else {
     const k = D.streak ? D.streak.current_streak : 0;
     const pastS = (D.sessions || []).filter(s => sessionEnd(s) < Date.now()).map(s => s.id);
@@ -551,7 +623,7 @@ function startChallenge() {
 }
 function drawChallenge() {
   const x = chal.q[chal.i];
-  modal(`<div class="between"><b>Daily Challenge · ${chal.i + 1}/3</b><span class="pill p-warn num" id="chT">${chal.left} s</span></div>${x.review ? '<span class="pill p-info" style="justify-self:start">Takrorlash · ' + esc(TOPICS[x.t].t) + '</span>' : ''}<div style="font-size:17px;font-weight:600">${esc(x.q)}</div><div class="stack">${x.o.map((o, i) => `<button class="q-opt" data-act="ans" data-i="${i}">${esc(o)}</button>`).join('')}</div>`);
+  modal(`<div class="between"><b>Daily Challenge · ${chal.i + 1}/3</b><span class="pill p-warn num" id="chT">${chal.left} s</span></div>${x.fromMistake ? '<span class="pill p-bad" style="justify-self:start">📒 Xatolaringizdan</span>' : ''}${x.review ? '<span class="pill p-info" style="justify-self:start">Takrorlash · ' + esc(TOPICS[x.t].t) + '</span>' : ''}<div style="font-size:17px;font-weight:600">${esc(x.q)}</div><div class="stack">${x.o.map((o, i) => `<button class="q-opt" data-act="ans" data-i="${i}">${esc(o)}</button>`).join('')}</div>`);
 }
 async function finishChallenge() {
   clearInterval(chal.timer); if (chal.done) return; chal.done = true;
@@ -593,7 +665,11 @@ document.addEventListener('click', async e => {
   if (a === 'unlinkPar') { if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Rostdanmi?'; return; }
     try { await q(sb.rpc('unlink_parent', {p_parent: id, p_student: b.dataset.st})); toast('Ajratildi'); loadParents(b.dataset.st); } catch (err) { toast(err.message); } return; }
   if (a === 'newHw') { const gs = myGroups(); if (!gs.length) return toast('Avval guruh yarating'); const dv = new Date(Date.now() + 864e5 - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
-    return modal(`<h2>Uy vazifa berish</h2><form id="hwForm" class="stack"><div class="field"><label for="hwG">Guruh</label><select id="hwG">${gs.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div><div class="field"><label for="hwT">Nomi</label><input id="hwT" placeholder="Writing: My family" required></div><div class="field"><label for="hwI">Shart (inglizcha)</label><textarea id="hwI" placeholder="Write 5 sentences about your family. Use am / is / are."></textarea></div><div class="field"><label for="hwD">Muddat</label><input id="hwD" type="datetime-local" value="${dv}"></div>${formBtns('Berish')}</form>`); }
+    const qz = TOPICS.map((t, i) => ({i, t})).filter(x => x.t.quiz && x.t.quiz.length);
+    return modal(`<h2>Uy vazifa berish</h2><form id="hwForm" class="stack"><div class="field"><label for="hwG">Guruh</label><select id="hwG">${gs.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div>
+    <div class="field"><label for="hwK">Turi</label><select id="hwK"><option value="written">✍️ Yozma (matn, rasm yoki ovoz bilan topshiriladi)</option>${qz.length ? '<option value="quiz">✅ Test — darsdan (avtomatik baholanadi)</option>' : ''}</select></div>
+    <div class="field" data-hk="quiz" style="display:none"><label for="hwL">Qaysi dars testi</label><select id="hwL">${qz.map(x => `<option value="${x.i}" ${x.i === ((gs[0]?.current_topic || 0) % TOPICS.length) ? 'selected' : ''}>${esc(x.t.unit)} · ${esc(x.t.t)} (${x.t.quiz.length} savol)</option>`).join('')}</select></div>
+    <div class="field"><label for="hwT">Nomi</label><input id="hwT" placeholder="Writing: My family"></div><div class="field" data-hk="written"><label for="hwI">Shart (inglizcha)</label><textarea id="hwI" placeholder="Write 5 sentences about your family. Use am / is / are."></textarea></div><div class="field"><label for="hwD">Muddat</label><input id="hwD" type="datetime-local" value="${dv}"></div>${formBtns('Berish')}</form>`); }
   if (a === 'nextTopic') { const g = D.groups.find(x => x.id === id); try { await q(sb.from('groups').update({current_topic: (g.current_topic + 1) % TOPICS.length}).eq('id', id)); toast('Mavzu yangilandi'); load(); } catch (err) { toast(err.message); } return; }
   if (a === 'approve' || a === 'return') {
     const sc = $('#sc_' + id).value, fb = $('#fb_' + id).value.trim();
@@ -604,11 +680,27 @@ document.addEventListener('click', async e => {
       await q(sb.from('submission_grades').upsert({submission_id: id, final_score: a === 'approve' ? Math.round(+sc) : null, final_feedback: fb || 'Please correct the mistakes and send again.', graded_by: me.id, approved_at: a === 'approve' ? new Date().toISOString() : null}));
       await q(sb.from('submissions').update({status: a === 'approve' ? 'approved' : 'returned'}).eq('id', id));
       toast(a === 'approve' ? 'Tasdiqlandi' : 'Qaytarildi'); load();
+      if (a === 'approve') aiTranslate(id); // ota-ona uchun o'zbekcha xulosa (kalit bo'lmasa jim o'tadi)
     } catch (err) { b.disabled = false; toast(err.message); }
     return;
   }
   if (a === 'submit') { const as = D.assignments.find(x => x.id === id); const s = D.subs.find(x => x.assignment_id === id);
-    return modal(`<h2>${esc(as.title)}</h2><p class="muted" style="margin:0;white-space:pre-wrap">${esc(as.instructions)}</p><form id="subForm" data-id="${id}" class="stack"><div class="field"><label for="subT">Javobingiz</label><textarea id="subT" required>${esc(s?.text_answer || '')}</textarea></div>${formBtns('Yuborish')}</form>`); }
+    if (as.type === 'quiz' && Array.isArray(as.quiz)) return modal(`<div class="between"><h2 style="font-size:18px">✅ ${esc(as.title)}</h2><button class="btn sm o" type="button" data-act="close">Yopish</button></div><p class="muted" style="margin:0">Test avtomatik baholanadi. Natija darhol chiqadi.</p>
+      <form id="quizAns" data-id="${id}" class="stack">${as.quiz.map((x, i) => `<fieldset style="border:1px solid var(--border);border-radius:12px;padding:10px"><legend style="font-weight:600;padding:0 6px">${i + 1}. ${esc(x.q)}</legend>${x.o.map((o, j) => `<label class="row" style="gap:8px;padding:4px 0;flex-wrap:nowrap"><input type="radio" name="qq${i}" value="${j}" style="width:18px;height:18px" required> ${esc(o)}</label>`).join('')}</fieldset>`).join('')}${formBtns('Testni topshirish')}</form>`);
+    rec.blob = null; rec.files = [];
+    return modal(`<h2>${esc(as.title)}</h2><p class="muted" style="margin:0;white-space:pre-wrap">${esc(as.instructions)}</p><form id="subForm" data-id="${id}" class="stack"><div class="field"><label for="subT">Javobingiz (matn)</label><textarea id="subT">${esc(s?.text_answer || '')}</textarea></div>
+      <div class="field"><label for="subF">📷 Rasm yoki PDF (daftaringiz surati, ixtiyoriy)</label><input id="subF" type="file" accept="image/*,application/pdf" multiple style="height:auto;padding:8px"></div>
+      <div class="field"><label>🎤 Ovozli javob (speaking uchun, ixtiyoriy)</label><div class="row"><button class="btn sm s" type="button" data-act="recToggle" id="recBtn">● Yozishni boshlash</button><span class="muted" id="recInfo" style="font-size:13px"></span></div><audio id="recPlay" controls style="display:none;width:100%"></audio></div>
+      ${(s?.file_paths || []).length || s?.voice_path ? `<div class="muted" style="font-size:13px">Oldin yuborilgan: ${(s.file_paths || []).length} ta fayl${s.voice_path ? ', ovoz' : ''}</div>` : ''}${formBtns('Yuborish')}</form>`); }
+  if (a === 'recToggle') {
+    if (rec.mr && rec.mr.state === 'recording') { rec.mr.stop(); return; }
+    try { const st = await navigator.mediaDevices.getUserMedia({audio: true}); const chunks = [];
+      rec.mr = new MediaRecorder(st); rec.mr.ondataavailable = ev => chunks.push(ev.data);
+      rec.mr.onstop = () => { st.getTracks().forEach(t => t.stop()); rec.blob = new Blob(chunks, {type: rec.mr.mimeType || 'audio/webm'}); clearInterval(rec.t);
+        const p = $('#recPlay'); if (p) { p.src = URL.createObjectURL(rec.blob); p.style.display = ''; } const bt = $('#recBtn'); if (bt) bt.textContent = '● Qayta yozish'; const inf = $('#recInfo'); if (inf) inf.textContent = 'Yozildi ✓'; };
+      rec.mr.start(); rec.sec = 0; b.textContent = '■ To\'xtatish'; rec.t = setInterval(() => { rec.sec++; const inf = $('#recInfo'); if (inf) inf.textContent = '🔴 ' + rec.sec + ' s'; if (rec.sec >= 180) rec.mr.stop(); }, 1000);
+    } catch (err) { toast('Mikrofonga ruxsat berilmadi'); } return; }
+  if (a === 'openFile') { b.disabled = true; try { const { data, error } = await sb.storage.from('submissions').createSignedUrl(b.dataset.path, 600); if (error) throw error; window.open(data.signedUrl, '_blank', 'noopener'); } catch (err) { toast(err.message); } finally { b.disabled = false; } return; }
   if (a === 'challenge') { chal.done = false; return startChallenge(); }
   if (a === 'openLesson') return openLesson(id);
   if (a === 'copyLesson') { b.disabled = true; try { await q(sb.rpc('copy_lesson', {p_lesson_id: id})); toast("Nusxa olindi — dars o'quvchilaringizga ochildi"); load(); } catch (err) { b.disabled = false; toast(err.message); } return; }
@@ -626,6 +718,29 @@ document.addEventListener('click', async e => {
   if (a === 'newLive') { const gs = myGroups(); if (!gs.length) return toast('Avval guruh yarating');
     const t = new Date(Date.now() + 864e5); t.setHours(15, 0, 0, 0); const dv = new Date(t.getTime() - t.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
     return modal(`<h2>Jonli dars rejalashtirish</h2><form id="liveForm" class="stack"><div class="field"><label for="lvG">Guruh</label><select id="lvG">${gs.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div><div class="field"><label for="lvD">Boshlanish vaqti</label><input id="lvD" type="datetime-local" value="${dv}" required></div><div class="field"><label for="lvM">Davomiyligi (daqiqa)</label><input id="lvM" type="number" min="10" max="240" value="45"></div><div class="field"><label for="lvU">Google Meet havolasi</label><input id="lvU" type="url" placeholder="https://meet.google.com/abc-defg-hij"></div>${formBtns('Saqlash')}</form>`); }
+  if (a === 'newObs') { const ts = Object.values(D.P).filter(p => p.role === 'teacher'); if (!ts.length) return toast("Avval o'qituvchi qo'shing");
+    return modal(`<h2>Dars kuzatuv varaqasi</h2><form id="obsForm" class="stack"><div class="field"><label for="obT">O'qituvchi</label><select id="obT">${ts.map(t => `<option value="${t.id}">${esc(t.full_name)}</option>`).join('')}</select></div>
+      <div class="field"><label for="obD">Sana</label><input id="obD" type="date" value="${todayISO()}"></div>
+      ${OBS_K.map(([k, l]) => `<div class="field"><label for="ob_${k}">${l} (1–5)</label><select id="ob_${k}">${[5, 4, 3, 2, 1].map(v => `<option value="${v}" ${v === 4 ? 'selected' : ''}>${v} ${'★'.repeat(v)}</option>`).join('')}</select></div>`).join('')}
+      <div class="field"><label for="obC">Izoh</label><textarea id="obC" style="min-height:80px" placeholder="Nima yaxshi bo'ldi?"></textarea></div><div class="field"><label for="obN">Keyingi qadam</label><input id="obN" placeholder="Masalan: o'quvchilarga ko'proq gapirish imkonini bering"></div>${formBtns('Saqlash')}</form>`); }
+  if (a === 'newTraining') { const t = new Date(Date.now() + 2 * 864e5); t.setHours(16, 0, 0, 0); const dv = new Date(t.getTime() - t.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+    return modal(`<h2>Trening qo'shish</h2><form id="trForm" class="stack"><div class="field"><label for="trT">Mavzu</label><input id="trT" required placeholder="Speaking darslarini qanday o'tish"></div><div class="field"><label for="trD">Tavsif</label><textarea id="trD" style="min-height:80px"></textarea></div><div class="field"><label for="trS">Vaqti</label><input id="trS" type="datetime-local" value="${dv}" required></div><div class="field"><label for="trU">Google Meet havolasi</label><input id="trU" type="url" placeholder="https://meet.google.com/..."></div>${formBtns('Saqlash')}</form>`); }
+  if (a === 'tatt') { b.disabled = true; try { await q(sb.from('training_attendance').upsert({training_id: id, teacher_id: b.dataset.st, status: b.dataset.k}, {onConflict: 'training_id,teacher_id'})); load(); } catch (err) { b.disabled = false; toast(err.message); } return; }
+  if (a === 'repCsv') { b.disabled = true; try { const {m, rows} = await monthlyRows(); if (!rows.length) { toast("Ma'lumot yo'q"); return; }
+      const cell = v => { const s = String(v ?? ''); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const csv = '﻿' + [REP_H, ...rows.map(repVals)].map(r => r.map(cell).join(';')).join('\r\n');
+      const a2 = document.createElement('a'); a2.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'})); a2.download = `northstar-hisobot-${m.slice(0, 7)}.csv`; a2.click();
+    } catch (err) { toast(err.message); } finally { b.disabled = false; } return; }
+  if (a === 'repPdf') { b.disabled = true; try { const {m, rows} = await monthlyRows(); if (!rows.length) { toast("Ma'lumot yo'q"); return; }
+      const w = window.open('', '_blank'); const d = new Date(m);
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Northstar hisobot ${m.slice(0, 7)}</title><style>body{font-family:Inter,Arial,sans-serif;font-size:11px;color:#17233B;margin:18px}h1{font-size:18px;margin:0}p{color:#53627A;margin:4px 0 12px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #D8E1F0;padding:4px 6px;text-align:left}th{background:#EAF1FF}tr:nth-child(even) td{background:#F5F8FF}@page{size:A4 landscape;margin:10mm}</style></head><body>
+        <h1>NORTHSTAR · Smartum International School</h1><p>Oylik hisobot: ${OYLAR[d.getMonth()]} ${d.getFullYear()} · Tayyorladi: ${esc(me.full_name)} · ${fmt(new Date().toISOString())}</p>
+        <table><tr>${REP_H.map(h => `<th>${h}</th>`).join('')}</tr>${rows.map(r => `<tr>${repVals(r).map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</table><script>setTimeout(()=>print(),300)<\/script></body></html>`);
+      w.document.close();
+    } catch (err) { toast(err.message); } finally { b.disabled = false; } return; }
+  if (a === 'mistakeOk') { b.disabled = true; try { await q(sb.rpc('resolve_mistake', {p_id: id})); D.mistakes = D.mistakes.filter(m => m.id !== id); render(); } catch (err) { b.disabled = false; toast(err.message); } return; }
+  if (a === 'mentor') { const s = D.students.find(x => x.profile_id === id); b.disabled = true;
+    try { await q(sb.from('students').update({is_mentor: !s.is_mentor}).eq('profile_id', id)); toast(!s.is_mentor ? 'Mentor qilindi 🌟 (+3 nishon bonusi)' : 'Mentorlikdan olindi'); load(); } catch (err) { b.disabled = false; toast(err.message); } return; }
   if (a === 'tgLink') { b.disabled = true;
     try { const code = await q(sb.rpc('telegram_link_code'));
       modal(`<h2>📲 Telegram'ga ulash</h2><p class="muted" style="margin:0">Baholar, eslatmalar, e'lonlar va har yakshanba haftalik hisobot Telegram'ga keladi.</p>
@@ -653,6 +768,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'kidSel') { D.active = e.target.value; load(); }
+  if (e.target.id === 'hwK') document.querySelectorAll('[data-hk]').forEach(x => { x.style.display = x.dataset.hk === e.target.value ? '' : 'none'; });
   if (e.target.name === 'pm') document.querySelectorAll('[data-pm]').forEach(x => { x.style.display = x.dataset.pm === e.target.value ? '' : 'none'; });
 });
 async function loadParents(sid) {
@@ -688,8 +804,20 @@ document.addEventListener('submit', async e => {
     if (f.id === 'parNew') { const sid = f.dataset.id; const st = D.P[sid] || {};
       const p = await fn({role: 'parent', full_name: $('#pnN').value.trim() || (st.full_name || '') + 'ning ota-onasi', login: 'ota.' + (st.login || 'user'), child_id: sid});
       modal(`<h2>Ota-ona logini yaratildi</h2>${credsBox(p, 'Ota-ona')}<button class="btn p" data-act="closeReload">Tayyor</button>`); return; }
-    if (f.id === 'hwForm') { const t = $('#hwT').value.trim(); if (!t) { toast('Vazifa nomini yozing'); return; }
-      await q(sb.from('assignments').insert({type: 'written', title: t, instructions: $('#hwI').value.trim(), target_group_id: $('#hwG').value, due_at: new Date($('#hwD').value).toISOString(), created_by: me.id})); closeModal(); view = 'homework'; toast('Vazifa berildi'); load(); return; }
+    if (f.id === 'hwForm') { const kind = $('#hwK').value; let t = $('#hwT').value.trim();
+      if (kind === 'quiz') { const tp = TOPICS[+$('#hwL').value]; if (!t) t = 'Test: ' + tp.t;
+        await q(sb.from('assignments').insert({type: 'quiz', title: t, instructions: tp.quiz.length + " ta savollik test. Har savolga bitta javob tanlang.", quiz: tp.quiz.map(x => ({q: x.q, o: x.o, a: x.a})), lesson_id: tp.id || null, target_group_id: $('#hwG').value, due_at: new Date($('#hwD').value).toISOString(), created_by: me.id}));
+      } else { if (!t) { toast('Vazifa nomini yozing'); return; }
+        await q(sb.from('assignments').insert({type: 'written', title: t, instructions: $('#hwI').value.trim(), target_group_id: $('#hwG').value, due_at: new Date($('#hwD').value).toISOString(), created_by: me.id})); }
+      closeModal(); view = 'homework'; toast('Vazifa berildi'); load(); return; }
+    if (f.id === 'obsForm') { const row = {teacher_id: $('#obT').value, observer_id: me.id, observed_on: $('#obD').value || todayISO(), comment: $('#obC').value.trim() || null, next_step: $('#obN').value.trim() || null};
+      OBS_K.forEach(([k]) => { row[k] = +$('#ob_' + k).value; });
+      await q(sb.from('observations').insert(row)); closeModal(); view = 'observe'; toast('Kuzatuv saqlandi'); load(); return; }
+    if (f.id === 'trForm') { const u = $('#trU').value.trim(); if (u && !/^https:\/\//.test(u)) { toast('Havola https:// bilan boshlansin'); return; }
+      await q(sb.from('trainings').insert({title: $('#trT').value.trim(), description: $('#trD').value.trim() || null, starts_at: new Date($('#trS').value).toISOString(), google_meet_url: u || null, created_by: me.id})); closeModal(); view = 'trainings'; toast("Trening qo'shildi"); load(); return; }
+    if (f.id === 'quizAns') { const as = D.assignments.find(x => x.id === f.dataset.id); const ans = as.quiz.map((x, i) => { const r = f.querySelector(`input[name=qq${i}]:checked`); return r ? +r.value : null; });
+      const r = await q(sb.rpc('submit_quiz', {p_assignment: as.id, p_answers: ans}));
+      modal(`<div style="text-align:center;display:grid;gap:10px"><div style="font-size:44px">${r.score >= 80 ? '🏆' : r.score >= 50 ? '👍' : '📚'}</div><h2>${r.correct}/${r.total} — ${r.score} ball</h2><p class="muted" style="margin:0">Xato javoblar «📒 Xatolarim» ga qo'shildi — Daily Challenge ularni qayta so'raydi.</p><button class="btn p" data-act="closeReload">Davom etish</button></div>`); return; }
     if (f.id === 'watchForm') { const url = ytEmbed($('#wtU').value); if (!url) { toast("YouTube havolasi noto'g'ri"); return; }
       const qs = $('#wtQ').value.split(/\n\s*\n/).map(bl => bl.split('\n').map(x => x.trim()).filter(Boolean)).filter(bl => bl.length >= 3).map(bl => { const o = bl.slice(1); const a = o.findIndex(x => x.startsWith('*')); return {q: bl[0], o: o.map(x => x.replace(/^\*\s*/, '')), a}; });
       if (!qs.length) { toast("Kamida 1 ta savol yozing (savol + 2 variant)"); return; }
@@ -718,12 +846,17 @@ document.addEventListener('submit', async e => {
       if (url && !rows.length) rows.push({lesson_id: l.id, section_type: 'listening', title: 'Listening', content: {text: '', url}, position: 1});
       if (rows.length) await q(sb.from('lesson_sections').insert(rows));
       closeModal(); toast('Dars saqlandi'); load(); return; }
-    if (f.id === 'subForm') { const t = $('#subT').value.trim(); if (t.length < 5) { toast('Javob juda qisqa'); return; } const aid = f.dataset.id; const s = D.subs.find(x => x.assignment_id === aid);
-      let sid = s?.id;
-      if (s) await q(sb.from('submissions').update({text_answer: t}).eq('id', s.id)); else sid = (await q(sb.from('submissions').insert({assignment_id: aid, student_id: me.id, text_answer: t}).select('id').single())).id;
-      closeModal(); toast("Yuborildi! O'qituvchi tekshiradi."); load();
-      if (sid) aiCheck(sid, true); // AI oldindan baholaydi (o'quvchiga ko'rinmaydi, o'qituvchi tasdiqlaydi)
-      return; }
+    if (f.id === 'subForm') { const t = $('#subT').value.trim(); const aid = f.dataset.id; const s = D.subs.find(x => x.assignment_id === aid);
+      const files = [...($('#subF')?.files || [])];
+      if (t.length < 5 && !files.length && !rec.blob) { toast('Javob yozing yoki rasm / ovoz qo\'shing'); return; }
+      if (files.some(x => x.size > 10 * 1048576)) { toast('Har fayl 10 MB dan oshmasin'); return; }
+      const up = async (blob, name) => { const path = `${me.id}/${aid}/${Date.now()}-${name.replace(/[^\w.-]/g, '_')}`; const { error } = await sb.storage.from('submissions').upload(path, blob, {contentType: blob.type || undefined, upsert: false}); if (error) throw error; return path; };
+      const paths = []; for (const fl of files) paths.push(await up(fl, fl.name));
+      const voice = rec.blob ? await up(rec.blob, 'voice.' + ((rec.blob.type || '').includes('ogg') ? 'ogg' : (rec.blob.type || '').includes('mp4') ? 'm4a' : 'webm')) : null;
+      const extra = {}; if (paths.length) extra.file_paths = [...(s?.file_paths || []), ...paths]; if (voice) extra.voice_path = voice;
+      if (s) { await q(sb.from('submissions').update({text_answer: t || null, ...extra}).eq('id', s.id)); closeModal(); toast("Yuborildi! O'qituvchi tekshiradi."); load(); if (t.length >= 5) aiCheck(s.id, true); return; }
+      const ns = await q(sb.from('submissions').insert({assignment_id: aid, student_id: me.id, text_answer: t || null, ...extra}).select('id').single());
+      closeModal(); toast("Yuborildi! O'qituvchi tekshiradi."); load(); if (t.length >= 5) aiCheck(ns.id, true); return; }
   } catch (err) { toast(err.message || 'Xato'); }
   finally { busy = false; if (btn) btn.disabled = false; }
 });
