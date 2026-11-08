@@ -287,7 +287,7 @@ function staff() {
   const nav = items.map(([k, l]) => `<button class="nav ${view === k ? 'on' : ''}" data-nav="${k}">${l}${k === 'check' && pc ? `<span class="pill p-warn">${pc}</span>` : ''}</button>`).join('');
   const body = ({home: head ? headHome : teacherHome, teachers: headTeachers, classes: classesView, lessons: lessonsView, homework: homeworkView, check: checkView, rating: ratingView, feedback: feedbackView, announce: announceView, live: liveView, watch: watchView, awards: awardsView})[view]();
   return `<div class="shell"><aside class="side"><div class="brand" style="color:var(--primary)">${STAR}<b>NORTHSTAR</b></div>${nav}
-    <div class="me"><b>${esc(me.full_name)}</b><div class="muted">${ROLE_UZ[me.role]} · ${esc(me.login)}</div><div class="row" style="margin-top:8px;gap:6px"><button class="btn sm o" data-act="pwOpen">Parol</button><button class="btn sm o" data-act="logout">Chiqish</button></div></div></aside>
+    <div class="me"><b>${esc(me.full_name)}</b><div class="muted">${ROLE_UZ[me.role]} · ${esc(me.login)}</div><div class="row" style="margin-top:8px;gap:6px"><button class="btn sm o" data-act="pwOpen">Parol</button><button class="btn sm o" data-act="tgLink" title="Telegram'ga ulash">📲</button><button class="btn sm o" data-act="logout">Chiqish</button></div></div></aside>
     <div class="topbar">${nav}<button class="nav" data-act="logout">Chiqish</button></div>
     <main class="main">${body}</main></div>${FB_BTN}`;
 }
@@ -533,7 +533,7 @@ function parentView() {
   return phoneShell(body, [['home','Bugun',ICON.home],['stats','Statistika',ICON.cup]]);
 }
 function phoneShell(body, tabs) {
-  return `<div class="phone">${body}<div class="row" style="justify-content:center"><button class="btn o sm" data-act="fbOpen">💬 Fikr bildirish</button><button class="btn o sm" data-act="pwOpen">🔑 Parolni almashtirish</button></div></div><nav class="bottom"><div class="in" style="grid-template-columns:repeat(${tabs.length + 1},1fr)">${tabs.map(([k, l, i]) => `<button class="${view === k ? 'on' : ''}" data-nav="${k}">${i}${l}</button>`).join('')}<button data-act="logout">${ICON.out}Chiqish</button></div></nav>`;
+  return `<div class="phone">${body}<div class="row" style="justify-content:center"><button class="btn o sm" data-act="fbOpen">💬 Fikr bildirish</button><button class="btn o sm" data-act="pwOpen">🔑 Parolni almashtirish</button><button class="btn o sm" data-act="tgLink">📲 Telegram'ga ulash</button></div></div><nav class="bottom"><div class="in" style="grid-template-columns:repeat(${tabs.length + 1},1fr)">${tabs.map(([k, l, i]) => `<button class="${view === k ? 'on' : ''}" data-nav="${k}">${i}${l}</button>`).join('')}<button data-act="logout">${ICON.out}Chiqish</button></div></nav>`;
 }
 
 /* ---------------- modals ---------------- */
@@ -612,6 +612,13 @@ document.addEventListener('click', async e => {
   if (a === 'newLive') { const gs = myGroups(); if (!gs.length) return toast('Avval guruh yarating');
     const t = new Date(Date.now() + 864e5); t.setHours(15, 0, 0, 0); const dv = new Date(t.getTime() - t.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
     return modal(`<h2>Jonli dars rejalashtirish</h2><form id="liveForm" class="stack"><div class="field"><label for="lvG">Guruh</label><select id="lvG">${gs.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div><div class="field"><label for="lvD">Boshlanish vaqti</label><input id="lvD" type="datetime-local" value="${dv}" required></div><div class="field"><label for="lvM">Davomiyligi (daqiqa)</label><input id="lvM" type="number" min="10" max="240" value="45"></div><div class="field"><label for="lvU">Google Meet havolasi</label><input id="lvU" type="url" placeholder="https://meet.google.com/abc-defg-hij"></div>${formBtns('Saqlash')}</form>`); }
+  if (a === 'tgLink') { b.disabled = true;
+    try { const code = await q(sb.rpc('telegram_link_code'));
+      modal(`<h2>📲 Telegram'ga ulash</h2><p class="muted" style="margin:0">Baholar, eslatmalar, e'lonlar va har yakshanba haftalik hisobot Telegram'ga keladi.</p>
+      <div class="ask" style="text-align:center"><div class="muted" style="font-size:13px">Sizning kodingiz (15 daqiqa amal qiladi)</div><div class="num" style="font-size:36px;font-weight:800;letter-spacing:.2em">${esc(code)}</div></div>
+      <ol style="margin:0;padding-left:20px"><li>Pastdagi tugma bilan botni oching</li><li>START ni bosing — bot avtomatik ulanadi</li></ol>
+      <a class="btn p" href="https://t.me/northstar_smartum_bot?start=${esc(code)}" target="_blank" rel="noopener">Botni ochish</a><button class="btn o" data-act="close">Yopish</button>`);
+    } catch (err) { toast(err.message); } finally { b.disabled = false; } return; }
   if (a === 'newWatch') { const cs = myClasses(); if (!cs.length) return toast('Avval sinf kerak');
     return modal(`<h2>Watching Time qo'shish</h2><form id="watchForm" class="stack"><div class="field"><label for="wtC">Sinf</label><select id="wtC">${cs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label for="wtT">Nomi</label><input id="wtT" required placeholder="Peppa Pig — My family"></div><div class="field"><label for="wtU">YouTube havolasi</label><input id="wtU" required placeholder="https://www.youtube.com/watch?v=..."></div><div class="field"><label for="wtQ">Savollar</label><textarea id="wtQ" style="min-height:180px" placeholder="Who is Peppa's brother?&#10;*George&#10;Danny&#10;Pedro&#10;&#10;Where do they live?&#10;in a flat&#10;*in a house"></textarea><span class="muted" style="font-size:12px">Har savol: 1-qator savol, keyin variantlar; to'g'ri javob oldiga * qo'ying. Savollar orasida bo'sh qator.</span></div>${formBtns('Saqlash')}</form>`); }
   if (a === 'watchOpen') { const w = D.wt.find(x => x.id === id); if (!w) return;
