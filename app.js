@@ -283,7 +283,8 @@ function homeworkView() {
   const hws = D.assignments.filter(a => gids.has(a.target_group_id));
   return `<div class="between"><h1 style="font-size:28px">Uy vazifalar</h1><button class="btn p" data-act="newHw">+ Uy vazifa berish</button></div>
   ${hws.length ? hws.map(h => { const st = groupStudents(h.target_group_id); const n = st.filter(s => D.subs.some(x => x.assignment_id === h.id && x.student_id === s.profile_id)).length; const g = D.groups.find(x => x.id === h.target_group_id);
-    return `<div class="card stack"><div class="between"><b>${esc(h.title)}</b><span class="pill p-info">${esc(g?.name)}</span></div><div class="muted" style="font-size:14px;white-space:pre-wrap">${esc(h.instructions)}</div><div class="between"><span class="muted" style="font-size:13px">Muddat: ${fmt(h.due_at)}</span><span class="num" style="font-size:13px"><b>${n}/${st.length}</b> topshirdi</span></div><div class="bar"><i style="width:${st.length ? n / st.length * 100 : 0}%"></i></div></div>`; }).join('') : `<div class="empty">Hali vazifa berilmagan.</div>`}`;
+    const miss = st.filter(s => !D.subs.some(x => x.assignment_id === h.id && x.student_id === s.profile_id)).map(s => D.P[s.profile_id]?.full_name).filter(Boolean);
+    return `<div class="card stack"><div class="between"><b>${esc(h.title)}</b><span class="pill p-info">${esc(g?.name)}</span></div><div class="muted" style="font-size:14px;white-space:pre-wrap">${esc(h.instructions)}</div><div class="between"><span class="muted" style="font-size:13px">Muddat: ${fmt(h.due_at)}</span><span class="num" style="font-size:13px"><b>${n}/${st.length}</b> topshirdi</span></div><div class="bar"><i style="width:${st.length ? n / st.length * 100 : 0}%"></i></div>${miss.length ? `<div style="font-size:13px"><span class="muted">Topshirmaganlar:</span> ${miss.map(esc).join(', ')}</div>` : ''}</div>`; }).join('') : `<div class="empty">Hali vazifa berilmagan.</div>`}`;
 }
 function checkView() {
   const list = pending();
@@ -293,7 +294,16 @@ function checkView() {
     <div style="white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12px">${esc(s.text_answer)}</div>
     <div class="row"><div class="field" style="width:120px"><label for="sc_${s.id}">Ball (0–100)</label><input id="sc_${s.id}" type="number" min="0" max="100" value="${g.ai_score ?? ''}"></div>
      <div class="field" style="flex:1;min-width:220px"><label for="fb_${s.id}">Izoh (keyingi qadam)</label><input id="fb_${s.id}" value="${esc(g.ai_feedback || '')}" placeholder="Masalan: Check Past Simple -ed endings."></div></div>
-    <div class="row"><button class="btn sm p" data-act="approve" data-id="${s.id}">Tasdiqlash</button><button class="btn sm t" data-act="return" data-id="${s.id}">Qayta ishlashga qaytarish</button></div></div>`; }).join('') : `<div class="empty">Tekshiriladigan ish yo'q.</div>`}`;
+    <div class="row"><button class="btn sm p" data-act="approve" data-id="${s.id}">Tasdiqlash</button><button class="btn sm t" data-act="return" data-id="${s.id}">Qayta ishlashga qaytarish</button></div></div>`; }).join('') : `<div class="empty">Tekshiriladigan ish yo'q.</div>`}
+  ${checkedHistory()}`;
+}
+function checkedHistory() {
+  const gids = new Set(myGroups().map(g => g.id));
+  const done = D.subs.filter(s => (s.status === 'approved' || s.status === 'returned') && D.assignments.some(a => a.id === s.assignment_id && gids.has(a.target_group_id))).slice(0, 20);
+  if (!done.length) return '';
+  return `<h2 style="font-size:18px">Tekshirilganlar (oxirgi ${done.length} ta)</h2>${done.map(s => { const a = D.assignments.find(x => x.id === s.assignment_id); const g0 = s.submission_grades; const g = (Array.isArray(g0) ? g0[0] : g0) || {};
+    return `<details class="card"><summary class="between" style="cursor:pointer;list-style:none"><b>${esc(D.P[s.student_id]?.full_name)} · ${esc(a?.title)}</b><span>${s.status === 'approved' ? `<span class="pill p-ok">${g.final_score ?? '—'} ball</span>` : '<span class="pill p-bad">Qaytarilgan</span>'}</span></summary>
+    <div class="stack" style="margin-top:10px"><div style="white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12px">${esc(s.text_answer)}</div>${g.final_feedback ? `<div class="muted" style="font-size:14px">Izoh: "${esc(g.final_feedback)}"</div>` : ''}${g.approved_at ? `<div class="muted" style="font-size:12px">${fmt(g.approved_at)}</div>` : ''}</div></details>`; }).join('')}`;
 }
 function ratingView() {
   return `<h1 style="font-size:28px">Reyting</h1><p class="muted" style="margin:0">Haftalik ball: vazifa bajarilishi 30%, sifati 30%, Daily Challenge 20%, faollik 20% + streak bonusi (maks. 100).</p>
@@ -382,7 +392,9 @@ async function finishChallenge() {
   try {
     await q(sb.from('daily_challenges').insert({student_id: me.id, challenge_date: todayISO(), questions: chal.q, answers: chal.answers, score: chal.score, completed_at: new Date().toISOString()}));
   } catch (e) { toast('Saqlanmadi: ' + e.message); }
-  modal(`<div style="text-align:center;display:grid;gap:10px"><div style="font-size:40px">🔥</div><h2>${chal.score}/3 — ${chal.score === 3 ? 'Great job!' : chal.score ? 'Good try!' : 'Keep going!'}</h2><button class="btn p" data-act="closeReload">Davom etish</button></div>`);
+  const review = chal.q.map((x, i) => { const ans = chal.answers[i]; const ok = ans === x.a;
+    return `<div style="text-align:left;border-top:1px solid var(--border);padding-top:8px"><div style="font-size:14px">${ok ? '✅' : '❌'} ${esc(x.q)}</div>${ok ? '' : `<div class="muted" style="font-size:13px">${ans === undefined ? 'Javob berilmadi' : 'Sizning javobingiz: ' + esc(x.o[ans])} · To'g'ri javob: <b style="color:var(--ok)">${esc(x.o[x.a])}</b></div>`}</div>`; }).join('');
+  modal(`<div style="text-align:center;display:grid;gap:10px"><div style="font-size:40px">🔥</div><h2>${chal.score}/3 — ${chal.score === 3 ? 'Great job!' : chal.score ? 'Good try!' : 'Keep going!'}</h2>${review}<button class="btn p" data-act="closeReload">Davom etish</button></div>`);
 }
 
 /* ---------------- events ---------------- */
