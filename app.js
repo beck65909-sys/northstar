@@ -30,51 +30,44 @@ const TOPICS = [
   {t:'"To Be" — Questions & Negatives', ask:[['"Are you happy?" — qisqa javob (ha)','Yes, I am.'],['"He is not tired" — qisqartirib','He isn\'t tired.'],['"Is it a cat?" (yo\'q)','No, it isn\'t.']]},
   {t:'Progress Check — Unit 1', ask:[['"woman" ko\'plikda?','women'],['We ___ in class 5.','are'],['___ umbrella (a/an)','an']]}
 ];
-/* t = TOPICS index (0..6). Challenge: 2 questions from the current topic + 1 review from earlier topics. */
+/* t = topic index in TOPICS: the daily challenge uses questions of the group's current topic */
 const BANK = [
   {t:0, q:'Choose the correct article: ___ orange', o:['a','an'], a:1},
   {t:0, q:'Choose the correct article: ___ pen', o:['a','an'], a:0},
   {t:0, q:'Choose the correct article: ___ umbrella', o:['a','an'], a:1},
-  {t:0, q:'Choose the correct article: ___ elephant', o:['a','an'], a:1},
-  {t:0, q:'Choose the correct article: ___ dog', o:['a','an'], a:0},
   {t:0, q:'Choose the correct article: ___ hour', o:['a','an'], a:1},
-  {t:0, q:'Match the word: "kitob"', o:['book','bag','boot'], a:0},
+  {t:0, q:'Choose the correct article: ___ book', o:['a','an'], a:0},
   {t:1, q:'Choose the plural: one box, two ___', o:['boxs','boxes','box'], a:1},
   {t:1, q:'Choose the plural: one cat, two ___', o:['cats','cates','cat'], a:0},
-  {t:1, q:'Choose the plural: one bus, two ___', o:['buss','buses','busses'], a:1},
   {t:1, q:'Choose the plural: one baby, two ___', o:['babys','babies','babyes'], a:1},
-  {t:1, q:'Choose the plural: one watch, two ___', o:['watchs','watches','watch'], a:1},
+  {t:1, q:'Choose the plural: one bus, two ___', o:['buss','buses','bus'], a:1},
   {t:2, q:'Choose the plural: one child, two ___', o:['childs','children','childrens'], a:1},
   {t:2, q:'Choose the plural: one foot, two ___', o:['foots','feet','feets'], a:1},
   {t:2, q:'Choose the plural: one man, two ___', o:['mans','men','mens'], a:1},
-  {t:2, q:'Choose the plural: one tooth, two ___', o:['tooths','teeth','teeths'], a:1},
   {t:2, q:'Choose the plural: one mouse, two ___', o:['mouses','mice','mices'], a:1},
   {t:3, q:'Choose the pronoun: Ali is my friend. ___ is 11.', o:['She','He','It'], a:1},
   {t:3, q:'Choose the pronoun: Madina and I are classmates. ___ like English.', o:['They','We','You'], a:1},
-  {t:3, q:'Choose the pronoun: My sister is a doctor. ___ is kind.', o:['He','She','They'], a:1},
-  {t:3, q:'Choose the pronoun: The books are new. ___ are on the desk.', o:['It','They','We'], a:1},
-  {t:3, q:'Match the word: "oila"', o:['family','father','friend'], a:0},
+  {t:3, q:'Choose the pronoun: I like Madina. I like ___.', o:['she','her','hers'], a:1},
+  {t:3, q:'Choose the pronoun: The books are on the desk. ___ are new.', o:['It','They','Them'], a:1},
   {t:4, q:'Fill in the gap: I ___ eleven years old.', o:['am','is','are'], a:0},
   {t:4, q:'Fill in the gap: My mother ___ a teacher.', o:['am','is','are'], a:1},
   {t:4, q:'Fill in the gap: We ___ in class 5-A.', o:['am','is','are'], a:2},
-  {t:4, q:'Fill in the gap: They ___ my friends.', o:['am','is','are'], a:2},
   {t:4, q:'Fill in the gap: It ___ a big school.', o:['am','is','are'], a:1},
   {t:5, q:'Put the words in order: you / are / happy / ?', o:['Are you happy?','You are happy?','Happy are you?'], a:0},
   {t:5, q:'Choose the short answer: Is it a dog? (no)', o:['No, it isn\'t.','No, it not.','No, isn\'t it.'], a:0},
   {t:5, q:'Choose the negative: She is tired.', o:['She isn\'t tired.','She not tired.','She aren\'t tired.'], a:0},
-  {t:5, q:'Choose the short answer: Are they students? (yes)', o:['Yes, they are.','Yes, they is.','Yes, are they.'], a:0},
-  {t:5, q:'Choose the question: He is at home.', o:['Is he at home?','He is at home?','Are he at home?'], a:0},
-  {t:6, q:'Choose the correct sentence:', o:['They are children.','They is childrens.','They are childs.'], a:0},
-  {t:6, q:'Fill in the gap: ___ apple and ___ banana', o:['an / a','a / an','a / a'], a:0},
-  {t:6, q:'Choose the correct sentence:', o:['I am not a teacher.','I is not a teacher.','I not am a teacher.'], a:0},
-  {t:6, q:'Choose the plural: one woman, two ___', o:['womans','women','womens'], a:1}
+  {t:5, q:'Choose the question: They are at home.', o:['Are they at home?','They are at home?','Is they at home?'], a:0},
+  {t:6, q:'Choose the correct sentence.', o:['They are my friends.','They is my friends.','They are my friend.'], a:0},
+  {t:6, q:'Match the word: "kitob"', o:['book','bag','boot'], a:0},
+  {t:6, q:'Match the word: "oila"', o:['family','father','friend'], a:0},
+  {t:6, q:'Choose the correct sentence.', o:['He is an teacher.','He is a teacher.','He are a teacher.'], a:1}
 ];
-const shuffle = arr => [...arr].sort(() => Math.random() - .5);
-function pickChallenge(topic) {
-  const pool = shuffle(BANK.filter(x => x.t === topic));
-  const rev = shuffle(BANK.filter(x => x.t < topic));
-  if (!rev.length) return pool.slice(0, 3); // birinchi mavzu: hammasi joriy mavzudan
-  return [...pool.slice(0, 2), {...rev[0], review: true}];
+function challengePool(topic) {
+  const shuffle = arr => [...arr].sort(() => Math.random() - .5);
+  let pool = shuffle(BANK.filter(x => x.t === topic));
+  if (pool.length < 3) pool = pool.concat(shuffle(BANK.filter(x => x.t < topic)));
+  if (pool.length < 3) pool = pool.concat(shuffle(BANK.filter(x => !pool.includes(x))));
+  return pool.slice(0, 3);
 }
 
 let me = null, view = null, D = {}, busy = false;
@@ -206,7 +199,7 @@ function staff() {
   const nav = items.map(([k, l]) => `<button class="nav ${view === k ? 'on' : ''}" data-nav="${k}">${l}${k === 'check' && pc ? `<span class="pill p-warn">${pc}</span>` : ''}</button>`).join('');
   const body = ({home: head ? headHome : teacherHome, teachers: headTeachers, classes: classesView, lessons: lessonsView, homework: homeworkView, check: checkView, rating: ratingView, feedback: feedbackView})[view]();
   return `<div class="shell"><aside class="side"><div class="brand" style="color:var(--primary)">${STAR}<b>NORTHSTAR</b></div>${nav}
-    <div class="me"><b>${esc(me.full_name)}</b><div class="muted">${ROLE_UZ[me.role]} · ${esc(me.login)}</div><div class="row" style="margin-top:8px;gap:6px"><button class="btn sm o" data-act="pwOpen">Parol</button><button class="btn sm o" data-act="logout">Chiqish</button></div></div></aside>
+    <div class="me"><b>${esc(me.full_name)}</b><div class="muted">${ROLE_UZ[me.role]} · ${esc(me.login)}</div><button class="btn sm o" data-act="logout" style="margin-top:8px">Chiqish</button></div></aside>
     <div class="topbar">${nav}<button class="nav" data-act="logout">Chiqish</button></div>
     <main class="main">${body}</main></div>${FB_BTN}`;
 }
@@ -242,12 +235,11 @@ function teacherHome() {
   const st = myGroups().flatMap(g => groupStudents(g.id).map(s => ({s, g})));
   const c = {ok:0, warn:0, bad:0}; const rows = [];
   st.forEach(({s, g}) => { const x = stStatus(s.profile_id, g.id); c[x[0]]++; if (x[0] !== 'ok') rows.push({s, g, x}); });
-  const act = st.filter(({s}) => Number((D.score[s.profile_id] || {}).score || 0) > 0);
-  const avg = act.length ? Math.round(act.reduce((a, {s}) => a + Number(D.score[s.profile_id].score), 0) / act.length) : 0;
+  const avg = st.length ? Math.round(st.reduce((a, {s}) => a + Number((D.score[s.profile_id] || {}).score || 0), 0) / st.length) : 0;
   return `<div class="between"><div><h1 style="font-size:28px">Xayrli kun, ${esc(me.full_name)}</h1><p class="muted" style="margin:4px 0 0">${myClasses().length} sinf · ${myGroups().length} guruh · ${pending().length} ta ish tekshirishni kutmoqda</p></div>
     <div class="row"><button class="btn s" data-nav="classes">+ O'quvchi qo'shish</button><button class="btn p" data-act="newHw">+ Uy vazifa berish</button></div></div>
-    <div class="kpis">${kpi("O'quvchilar", st.length)}${kpi('Tekshirilmagan', pending().length, 'var(--warn)')}<div class="card kpi"><div class="l">O'rtacha ball</div><div class="v num">${avg}</div><div class="muted" style="font-size:12px">${act.length} ta faol o'quvchi bo'yicha</div></div>
-      <div class="card kpi"><div class="l">Svetofor</div><div class="row num" style="margin-top:8px"><span class="pill p-ok" title="Reja bo'yicha">${c.ok}</span><span class="pill p-warn" title="E'tibor kerak: 1 ta vazifa orqada yoki Daily Challenge qilmayapti">${c.warn}</span><span class="pill p-bad" title="Orqada: 2+ vazifa topshirilmagan">${c.bad}</span></div><div class="muted" style="font-size:12px;margin-top:6px">yashil — reja bo'yicha · sariq — e'tibor · qizil — orqada</div></div></div>
+    <div class="kpis">${kpi("O'quvchilar", st.length)}${kpi('Tekshirilmagan', pending().length, 'var(--warn)')}${kpi("O'rtacha ball", avg)}
+      <div class="card kpi"><div class="l">Svetofor</div><div class="row num" style="margin-top:8px"><span class="pill p-ok">${c.ok}</span><span class="pill p-warn">${c.warn}</span><span class="pill p-bad">${c.bad}</span></div></div></div>
     <section class="card stack"><h2 style="font-size:18px">E'tibor kerak bo'lgan o'quvchilar</h2>
     ${rows.length ? `<div class="tbl-wrap"><table><tr><th>O'quvchi</th><th>Guruh</th><th>Holat</th><th>Ball</th><th>Streak</th></tr>${rows.map(r => `<tr><td><b>${esc(D.P[r.s.profile_id]?.full_name)}</b></td><td>${esc(r.g.name)}</td><td><span class="pill p-${r.x[0]}">${esc(r.x[1])}</span></td><td class="num">${(D.score[r.s.profile_id] || {}).score ?? '—'}</td><td class="num">${(D.score[r.s.profile_id] || {}).streak ?? 0}</td></tr>`).join('')}</table></div>` : `<div class="empty">${st.length ? "Hamma o'quvchi reja bo'yicha." : "Hali o'quvchi yo'q. «Mening sinflarim» bo'limida qo'shing."}</div>`}</section>`;
 }
@@ -283,8 +275,7 @@ function homeworkView() {
   const hws = D.assignments.filter(a => gids.has(a.target_group_id));
   return `<div class="between"><h1 style="font-size:28px">Uy vazifalar</h1><button class="btn p" data-act="newHw">+ Uy vazifa berish</button></div>
   ${hws.length ? hws.map(h => { const st = groupStudents(h.target_group_id); const n = st.filter(s => D.subs.some(x => x.assignment_id === h.id && x.student_id === s.profile_id)).length; const g = D.groups.find(x => x.id === h.target_group_id);
-    const miss = st.filter(s => !D.subs.some(x => x.assignment_id === h.id && x.student_id === s.profile_id)).map(s => D.P[s.profile_id]?.full_name).filter(Boolean);
-    return `<div class="card stack"><div class="between"><b>${esc(h.title)}</b><span class="pill p-info">${esc(g?.name)}</span></div><div class="muted" style="font-size:14px;white-space:pre-wrap">${esc(h.instructions)}</div><div class="between"><span class="muted" style="font-size:13px">Muddat: ${fmt(h.due_at)}</span><span class="num" style="font-size:13px"><b>${n}/${st.length}</b> topshirdi</span></div><div class="bar"><i style="width:${st.length ? n / st.length * 100 : 0}%"></i></div>${miss.length ? `<div style="font-size:13px"><span class="muted">Topshirmaganlar:</span> ${miss.map(esc).join(', ')}</div>` : ''}</div>`; }).join('') : `<div class="empty">Hali vazifa berilmagan.</div>`}`;
+    return `<div class="card stack"><div class="between"><b>${esc(h.title)}</b><span class="pill p-info">${esc(g?.name)}</span></div><div class="muted" style="font-size:14px;white-space:pre-wrap">${esc(h.instructions)}</div><div class="between"><span class="muted" style="font-size:13px">Muddat: ${fmt(h.due_at)}</span><span class="num" style="font-size:13px"><b>${n}/${st.length}</b> topshirdi</span></div><div class="bar"><i style="width:${st.length ? n / st.length * 100 : 0}%"></i></div></div>`; }).join('') : `<div class="empty">Hali vazifa berilmagan.</div>`}`;
 }
 function checkView() {
   const list = pending();
@@ -294,16 +285,7 @@ function checkView() {
     <div style="white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12px">${esc(s.text_answer)}</div>
     <div class="row"><div class="field" style="width:120px"><label for="sc_${s.id}">Ball (0–100)</label><input id="sc_${s.id}" type="number" min="0" max="100" value="${g.ai_score ?? ''}"></div>
      <div class="field" style="flex:1;min-width:220px"><label for="fb_${s.id}">Izoh (keyingi qadam)</label><input id="fb_${s.id}" value="${esc(g.ai_feedback || '')}" placeholder="Masalan: Check Past Simple -ed endings."></div></div>
-    <div class="row"><button class="btn sm p" data-act="approve" data-id="${s.id}">Tasdiqlash</button><button class="btn sm t" data-act="return" data-id="${s.id}">Qayta ishlashga qaytarish</button></div></div>`; }).join('') : `<div class="empty">Tekshiriladigan ish yo'q.</div>`}
-  ${checkedHistory()}`;
-}
-function checkedHistory() {
-  const gids = new Set(myGroups().map(g => g.id));
-  const done = D.subs.filter(s => (s.status === 'approved' || s.status === 'returned') && D.assignments.some(a => a.id === s.assignment_id && gids.has(a.target_group_id))).slice(0, 20);
-  if (!done.length) return '';
-  return `<h2 style="font-size:18px">Tekshirilganlar (oxirgi ${done.length} ta)</h2>${done.map(s => { const a = D.assignments.find(x => x.id === s.assignment_id); const g0 = s.submission_grades; const g = (Array.isArray(g0) ? g0[0] : g0) || {};
-    return `<details class="card"><summary class="between" style="cursor:pointer;list-style:none"><b>${esc(D.P[s.student_id]?.full_name)} · ${esc(a?.title)}</b><span>${s.status === 'approved' ? `<span class="pill p-ok">${g.final_score ?? '—'} ball</span>` : '<span class="pill p-bad">Qaytarilgan</span>'}</span></summary>
-    <div class="stack" style="margin-top:10px"><div style="white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12px">${esc(s.text_answer)}</div>${g.final_feedback ? `<div class="muted" style="font-size:14px">Izoh: "${esc(g.final_feedback)}"</div>` : ''}${g.approved_at ? `<div class="muted" style="font-size:12px">${fmt(g.approved_at)}</div>` : ''}</div></details>`; }).join('')}`;
+    <div class="row"><button class="btn sm p" data-act="approve" data-id="${s.id}">Tasdiqlash</button><button class="btn sm t" data-act="return" data-id="${s.id}">Qayta ishlashga qaytarish</button></div></div>`; }).join('') : `<div class="empty">Tekshiriladigan ish yo'q.</div>`}`;
 }
 function ratingView() {
   return `<h1 style="font-size:28px">Reyting</h1><p class="muted" style="margin:0">Haftalik ball: vazifa bajarilishi 30%, sifati 30%, Daily Challenge 20%, faollik 20% + streak bonusi (maks. 100).</p>
@@ -317,7 +299,6 @@ function studentView() {
   const g = D.group; const k = D.streak && D.streak.last_completed_date >= new Date(Date.now() - 864e5).toLocaleDateString('en-CA', {timeZone:'Asia/Tashkent'}) ? D.streak.current_streak : 0;
   const subOf = id => D.subs.find(s => s.assignment_id === id);
   const open = D.assignments.filter(a => { const s = subOf(a.id); return !s || s.status === 'returned'; });
-  const waiting = D.assignments.filter(a => { const s = subOf(a.id); return s && s.status !== 'approved' && s.status !== 'returned'; });
   const topic = TOPICS[(g?.current_topic || 0) % TOPICS.length];
   let body = '';
   if (view === 'home') {
@@ -325,8 +306,7 @@ function studentView() {
     body = `<div class="between"><div><div class="muted" style="font-size:13px">Xayrli kun</div><h1 style="font-size:24px">Salom, ${esc(me.full_name.split(' ')[0])}!</h1></div><span class="streak num">🔥 ${k} kun</span></div>
     <div class="card stack"><div class="between" style="font-size:13px"><b>${esc(g?.name || '')}</b><span class="muted">Mavzu ${((g?.current_topic || 0) % TOPICS.length) + 1}/${TOPICS.length}</span></div><div class="bar"><i style="width:${(((g?.current_topic || 0) % TOPICS.length) + 1) / TOPICS.length * 100}%"></i></div><div class="muted" style="font-size:13px">${esc(topic.t)}</div></div>
     <div class="hero-card"><div style="font-size:12px;font-weight:600;letter-spacing:.06em;opacity:.8">DAILY CHALLENGE · 1 DAQIQA</div><div style="font-size:17px;font-weight:700">${D.todayCh ? 'Bugungi challenge bajarildi ✓ (' + D.todayCh.score + '/3)' : '3 ta savol — streakni saqlang'}</div>${D.todayCh ? '' : '<button class="btn" style="background:#fff;color:#1746A2" data-act="challenge">Boshlash</button>'}</div>
-    <div class="card stack"><div class="between"><b>Vazifalar</b><span class="muted">${open.length} ta</span></div>${open.slice(0, 3).map(a => `<div class="between"><div><div style="font-weight:600">${esc(a.title)}</div><div style="font-size:12px;font-weight:600;color:${a.due_at && new Date(a.due_at) < new Date() ? 'var(--bad)' : 'var(--warn)'}">${fmt(a.due_at)} gacha</div></div><button class="btn sm s" data-act="submit" data-id="${a.id}">Topshirish</button></div>`).join('') || (waiting.length ? '' : '<div class="muted">Hamma vazifa topshirilgan 🎉</div>')}
-    ${waiting.map(a => `<div class="between"><div style="font-weight:600">${esc(a.title)}</div><span class="pill p-info">Tekshirilmoqda</span></div>`).join('')}</div>
+    <div class="card stack"><div class="between"><b>Vazifalar</b><span class="muted">${open.length} ta</span></div>${open.slice(0, 3).map(a => `<div class="between"><div><div style="font-weight:600">${esc(a.title)}</div><div style="font-size:12px;font-weight:600;color:${a.due_at && new Date(a.due_at) < new Date() ? 'var(--bad)' : 'var(--warn)'}">${fmt(a.due_at)} gacha</div></div><button class="btn sm s" data-act="submit" data-id="${a.id}">Topshirish</button></div>`).join('') || '<div class="muted">Hamma vazifa topshirilgan 🎉</div>'}</div>
     ${last ? `<div class="card row"><div class="num" style="font-size:28px;font-weight:700;color:var(--ok)">${last.final_score}</div><div style="min-width:0"><div style="font-size:13px;font-weight:600">Oxirgi natija · ${esc(D.assignments.find(a => a.id === last.assignment_id)?.title)}</div><div class="muted" style="font-size:13px">"${esc(last.final_feedback)}"</div></div></div>` : ''}`;
   } else if (view === 'tasks') {
     body = `<h1 style="font-size:24px">Vazifalar</h1>${D.assignments.map(a => { const s = subOf(a.id); const st = !s ? ['warn', 'Topshirilmagan'] : s.status === 'approved' ? ['ok', 'Baholandi'] : s.status === 'returned' ? ['bad', 'Qayta ishlash kerak'] : ['info', 'Tekshirilmoqda'];
@@ -367,7 +347,7 @@ function parentView() {
   return phoneShell(body, [['home','Bugun',ICON.home],['stats','Statistika',ICON.cup]]);
 }
 function phoneShell(body, tabs) {
-  return `<div class="phone">${body}<div class="row" style="justify-content:center"><button class="btn o sm" data-act="fbOpen">💬 Fikr bildirish</button><button class="btn o sm" data-act="pwOpen">🔑 Parolni almashtirish</button></div></div><nav class="bottom"><div class="in" style="grid-template-columns:repeat(${tabs.length + 1},1fr)">${tabs.map(([k, l, i]) => `<button class="${view === k ? 'on' : ''}" data-nav="${k}">${i}${l}</button>`).join('')}<button data-act="logout">${ICON.out}Chiqish</button></div></nav>`;
+  return `<div class="phone">${body}<button class="btn o sm" data-act="fbOpen" style="justify-self:center">💬 Fikr bildirish</button></div><nav class="bottom"><div class="in" style="grid-template-columns:repeat(${tabs.length + 1},1fr)">${tabs.map(([k, l, i]) => `<button class="${view === k ? 'on' : ''}" data-nav="${k}">${i}${l}</button>`).join('')}<button data-act="logout">${ICON.out}Chiqish</button></div></nav>`;
 }
 
 /* ---------------- modals ---------------- */
@@ -378,23 +358,21 @@ const formBtns = l => `<div class="row"><button class="btn p" type="submit">${l}
 
 const chal = {q: [], i: 0, score: 0, left: 60, timer: null};
 function startChallenge() {
-  Object.assign(chal, {q: pickChallenge(((D.group?.current_topic) || 0) % TOPICS.length), i: 0, score: 0, left: 60, answers: []});
+  Object.assign(chal, {q: challengePool((D.group?.current_topic || 0) % TOPICS.length), i: 0, score: 0, left: 60, answers: []});
   clearInterval(chal.timer);
   chal.timer = setInterval(() => { chal.left--; const t = $('#chT'); if (t) t.textContent = chal.left + ' s'; if (chal.left <= 0) finishChallenge(); }, 1000);
   drawChallenge();
 }
 function drawChallenge() {
   const x = chal.q[chal.i];
-  modal(`<div class="between"><b>Daily Challenge · ${chal.i + 1}/3</b><span class="pill p-warn num" id="chT">${chal.left} s</span></div>${x.review ? '<span class="pill p-info" style="justify-self:start">Takrorlash · ' + esc(TOPICS[x.t].t) + '</span>' : ''}<div style="font-size:17px;font-weight:600">${esc(x.q)}</div><div class="stack">${x.o.map((o, i) => `<button class="q-opt" data-act="ans" data-i="${i}">${esc(o)}</button>`).join('')}</div>`);
+  modal(`<div class="between"><b>Daily Challenge · ${chal.i + 1}/3</b><span class="pill p-warn num" id="chT">${chal.left} s</span></div><div style="font-size:17px;font-weight:600">${esc(x.q)}</div><div class="stack">${x.o.map((o, i) => `<button class="q-opt" data-act="ans" data-i="${i}">${esc(o)}</button>`).join('')}</div>`);
 }
 async function finishChallenge() {
   clearInterval(chal.timer); if (chal.done) return; chal.done = true;
   try {
     await q(sb.from('daily_challenges').insert({student_id: me.id, challenge_date: todayISO(), questions: chal.q, answers: chal.answers, score: chal.score, completed_at: new Date().toISOString()}));
   } catch (e) { toast('Saqlanmadi: ' + e.message); }
-  const review = chal.q.map((x, i) => { const ans = chal.answers[i]; const ok = ans === x.a;
-    return `<div style="text-align:left;border-top:1px solid var(--border);padding-top:8px"><div style="font-size:14px">${ok ? '✅' : '❌'} ${esc(x.q)}</div>${ok ? '' : `<div class="muted" style="font-size:13px">${ans === undefined ? 'Javob berilmadi' : 'Sizning javobingiz: ' + esc(x.o[ans])} · To'g'ri javob: <b style="color:var(--ok)">${esc(x.o[x.a])}</b></div>`}</div>`; }).join('');
-  modal(`<div style="text-align:center;display:grid;gap:10px"><div style="font-size:40px">🔥</div><h2>${chal.score}/3 — ${chal.score === 3 ? 'Great job!' : chal.score ? 'Good try!' : 'Keep going!'}</h2>${review}<button class="btn p" data-act="closeReload">Davom etish</button></div>`);
+  modal(`<div style="text-align:center;display:grid;gap:10px"><div style="font-size:40px">🔥</div><h2>${chal.score}/3 — ${chal.score === 3 ? 'Great job!' : chal.score ? 'Good try!' : 'Keep going!'}</h2><button class="btn p" data-act="closeReload">Davom etish</button></div>`);
 }
 
 /* ---------------- events ---------------- */
@@ -438,7 +416,6 @@ document.addEventListener('click', async e => {
     <div class="field"><label for="lsV">Video yoki material havolasi (ixtiyoriy)</label><input id="lsV" type="url" placeholder="https://youtube.com/..."></div>
     ${me.role === 'head_teacher' ? '<label class="row"><input id="lsTpl" type="checkbox" checked style="width:20px;height:20px"> Namuna dars (hamma o\'qituvchiga ochiq)</label>' : ''}${formBtns('Saqlash')}</form>`);
   if (a === 'fbOpen') return modal(`<h2>Fikr bildirish</h2><p class="muted" style="margin:0">Nima yoqdi, nima yoqmadi, nimani o'zgartirish kerak? Taklifingiz to'g'ridan-to'g'ri ishlab chiquvchiga boradi.</p><form id="fbForm" class="stack"><div class="field"><label for="fbT">Fikringiz</label><textarea id="fbT" required></textarea></div>${formBtns('Yuborish')}</form>`);
-  if (a === 'pwOpen') return modal(`<h2>Parolni almashtirish</h2><form id="pwForm" class="stack"><div class="field"><label for="pw1">Yangi parol (kamida 6 belgi)</label><input id="pw1" type="password" autocomplete="new-password" minlength="6" required></div><div class="field"><label for="pw2">Yangi parolni takrorlang</label><input id="pw2" type="password" autocomplete="new-password" minlength="6" required></div>${formBtns('Saqlash')}</form>`);
   if (a === 'fbDone') { try { await q(sb.from('feedback').update({status: 'done'}).eq('id', id)); load(); } catch (err) { toast(err.message); } return; }
   if (a === 'ans') { const x = chal.q[chal.i], i = +b.dataset.i; chal.answers.push(i);
     document.querySelectorAll('.q-opt').forEach((o, j) => { o.disabled = true; if (j === x.a) o.classList.add('ok'); else if (j === i) o.classList.add('no'); });
@@ -466,11 +443,6 @@ document.addEventListener('submit', async e => {
       modal(`<h2>${esc(n)} qo'shildi</h2>${credsBox(u, "O'quvchi")}${extra}<button class="btn p" data-act="closeReload">Tayyor</button>`); return; }
     if (f.id === 'hwForm') { const t = $('#hwT').value.trim(); if (!t) { toast('Vazifa nomini yozing'); return; }
       await q(sb.from('assignments').insert({type: 'written', title: t, instructions: $('#hwI').value.trim(), target_group_id: $('#hwG').value, due_at: new Date($('#hwD').value).toISOString(), created_by: me.id})); closeModal(); view = 'homework'; toast('Vazifa berildi'); load(); return; }
-    if (f.id === 'pwForm') { const p1 = $('#pw1').value, p2 = $('#pw2').value;
-      if (p1.length < 6) { toast("Parol kamida 6 belgi bo'lsin"); return; } if (p1 !== p2) { toast('Parollar bir xil emas'); return; }
-      if (/^demo\./.test(me.login || '')) { toast("Demo akkauntda parolni almashtirib bo'lmaydi"); return; }
-      const { error } = await sb.auth.updateUser({password: p1}); if (error) { toast(error.message); return; }
-      closeModal(); toast('Parol almashtirildi'); return; }
     if (f.id === 'fbForm') { const t = $('#fbT').value.trim(); if (t.length < 2) { toast('Fikringizni yozing'); return; } await q(sb.from('feedback').insert({author_id: me.id, page: ROLE_UZ[me.role] + ' · ' + (view || ''), body: t})); closeModal(); toast('Rahmat! Fikringiz yuborildi.'); return; }
     if (f.id === 'lsForm') { const title = $('#lsT').value.trim(); if (!title) { toast('Mavzuni yozing'); return; }
       const l = await q(sb.from('lessons').insert({owner_id: me.id, title, objective: $('#lsO').value.trim() || null, is_template: !!($('#lsTpl') && $('#lsTpl').checked), position: D.lessons.length + 1}).select().single());
