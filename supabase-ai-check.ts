@@ -1,4 +1,4 @@
-// Northstar: uy vazifasini AI (Gemini) bilan oldindan tekshirish. Supabase'da ishlayotgan versiya: v7.
+// Northstar: uy vazifasini AI (Gemini) bilan oldindan tekshirish. Supabase'da ishlayotgan versiya: v8.
 // O'quvchi yoki o'qituvchi chaqiradi: POST { submission_id }.
 // Matnli javob ham, daftar surati (rasm) ham tekshiriladi.
 // Natija submission_grades.ai_score / ai_feedback ga yoziladi, status 'ai_checked' bo'ladi.
@@ -86,7 +86,8 @@ Deno.serve(async (req) => {
   if (!GKEY) return j({ error: "AI hali ulanmagan (GEMINI_API_KEY yo'q)" }, 503);
   const auth = req.headers.get("Authorization") ?? "";
   const user = createClient(URL_, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } }, auth: { persistSession: false } });
-  const { data: { user: u } } = await user.auth.getUser();
+  const token = auth.replace(/^Bearer\s+/i, "");
+  const { data: { user: u } } = await user.auth.getUser(token);
   if (!u) return j({ error: "Kirish kerak" }, 401);
   let body: any; try { body = await req.json(); } catch { return j({ error: "JSON xato" }, 400); }
   const sid = String(body.submission_id ?? "");
