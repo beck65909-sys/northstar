@@ -582,6 +582,11 @@ function boardHtml(board, selfId, title) {
   <p class="muted" style="font-size:13px">Har kuni Daily Challenge va vaqtida topshirilgan vazifa ballni oshiradi.</p>`;
 }
 /* parent */
+function parentHistory() {
+  const hist = (D.grades || []).filter(x => x.status === 'approved' && x.final_score != null).sort((a, b) => new Date(b.approved_at || 0) - new Date(a.approved_at || 0)).slice(0, 10);
+  const rows = hist.map(g => { const a = (D.assignments || []).find(x => x.id === g.assignment_id); const uz = (D.uz || {})[g.submission_id]; return `<div class="stack" style="gap:2px;padding:8px 0;border-top:1px solid var(--border)"><div class="between"><span>${esc(a ? a.title : 'Vazifa')}</span><b class="num">${g.final_score}</b></div><span class="muted" style="font-size:12px">${g.approved_at ? fmt(g.approved_at) : ''}</span>${uz ? `<span class="muted" style="font-size:13px">🇺🇿 ${esc(uz)}</span>` : ''}</div>`; }).join('');
+  return `<div class="card stack"><b>📋 Oxirgi baholar</b>${rows || '<span class="muted">Hali baho yo\'q</span>'}</div>`;
+}
 function parentView() {
   if (!view || !['home','stats'].includes(view)) view = 'home';
   if (!D.kids || !D.kids.length) return phoneShell(`<div class="empty">Sizga hali farzand biriktirilmagan. O'qituvchiga murojaat qiling.</div>`, []);
@@ -600,7 +605,7 @@ function parentView() {
     const came = (D.att || []).filter(a => pastS.includes(a.session_id) && a.status !== 'absent').length;
     body += `<div class="kpis">${kpi('Haftalik ball', mine ? mine.score : '—')}${kpi('Streak', k)}${pastS.length ? kpi('Davomat', came + '/' + pastS.length) : ''}</div>
     <div class="card stack"><div class="between"><span>Guruhda o'rni</span><b class="num">${mine ? mine.rnk + "-o'rin" : '—'}</b></div></div>
-    <div class="card stack"><b>🏅 Nishonlar</b>${badgeChips(D.sbadges || [])}</div>${boardHtml(D.board, kid.profile_id, 'Guruh top-3')}`;
+    <div class="card stack"><b>🏅 Nishonlar</b>${badgeChips(D.sbadges || [])}</div>${parentHistory()}${boardHtml(D.board, kid.profile_id, 'Guruh top-3')}`;
   }
   return phoneShell(body, [['home','Bugun',ICON.home],['stats','Statistika',ICON.cup]]);
 }
@@ -854,9 +859,9 @@ document.addEventListener('submit', async e => {
       const paths = []; for (const fl of files) paths.push(await up(fl, fl.name));
       const voice = rec.blob ? await up(rec.blob, 'voice.' + ((rec.blob.type || '').includes('ogg') ? 'ogg' : (rec.blob.type || '').includes('mp4') ? 'm4a' : 'webm')) : null;
       const extra = {}; if (paths.length) extra.file_paths = [...(s?.file_paths || []), ...paths]; if (voice) extra.voice_path = voice;
-      if (s) { await q(sb.from('submissions').update({text_answer: t || null, ...extra}).eq('id', s.id)); closeModal(); toast("Yuborildi! O'qituvchi tekshiradi."); load(); if (t.length >= 5) aiCheck(s.id, true); return; }
+      if (s) { await q(sb.from('submissions').update({text_answer: t || null, ...extra}).eq('id', s.id)); closeModal(); toast("Yuborildi! O'qituvchi tekshiradi."); load(); if (t.length >= 5 || paths.length) aiCheck(s.id, true); return; }
       const ns = await q(sb.from('submissions').insert({assignment_id: aid, student_id: me.id, text_answer: t || null, ...extra}).select('id').single());
-      closeModal(); toast("Yuborildi! O'qituvchi tekshiradi."); load(); if (t.length >= 5) aiCheck(ns.id, true); return; }
+      closeModal(); toast("Yuborildi! O'qituvchi tekshiradi."); load(); if (t.length >= 5 || paths.length) aiCheck(ns.id, true); return; }
   } catch (err) { toast(err.message || 'Xato'); }
   finally { busy = false; if (btn) btn.disabled = false; }
 });
